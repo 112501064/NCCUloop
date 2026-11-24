@@ -1,18 +1,28 @@
 import React, { useState } from 'react';
+import { signInWithPopup, signOut } from 'firebase/auth';
+import { auth, googleProvider } from '../firebase';
 import { UserProfile, Language, CampusZone } from '../types';
 import { APP_CONFIG } from '../config/appConfig';
-import { I18N } from '../data/i18n';
-import { 
-  Mail, CheckCircle2, ShieldCheck, CreditCard, 
-  User, Lock, Sparkles, ArrowRight, ArrowLeft, Globe, Zap
+import { NccuLoopLogo } from './NccuLoopLogo';
+import {
+  CheckCircle2,
+  ArrowRight,
+  ArrowLeft,
+  Globe,
+  ShieldCheck,
+  AlertCircle,
+  Loader2,
 } from 'lucide-react';
 
 interface OnboardingGateProps {
   onComplete: (userProfile: Partial<UserProfile>) => void;
-  onQuickDemoLogin: () => void;
+  onQuickDemoLogin?: () => void;
   lang: Language;
   onToggleLang: () => void;
 }
+
+const isDemoEnabled =
+  import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO === 'true';
 
 export const OnboardingGate: React.FC<OnboardingGateProps> = ({
   onComplete,
@@ -20,46 +30,70 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
   lang,
   onToggleLang,
 }) => {
-  const t = I18N[lang];
   const [step, setStep] = useState<number>(1);
 
-  // Step 1: NCCU Webmail & OTP
-  const [email, setEmail] = useState<string>('112501064@g.nccu.edu.tw');
-  const [emailError, setEmailError] = useState<string>('');
-  const [otpSent, setOtpSent] = useState<boolean>(true);
-  const [otpCode, setOtpCode] = useState<string>('849201');
+  // Step 1: Firebase Google Authentication (@g.nccu.edu.tw)
+  const [isSigningIn, setIsSigningIn] = useState<boolean>(false);
+  const [authError, setAuthError] = useState<string>('');
+  const [verifiedUid, setVerifiedUid] = useState<string>('');
+  const [verifiedEmail, setVerifiedEmail] = useState<string>('');
+  const [verifiedAvatar, setVerifiedAvatar] = useState<string>('');
 
   // Step 2: Basic Profile
-  const [nickname, setNickname] = useState<string>('政大巧芸 (Audrey)');
-  const [password, setPassword] = useState<string>('nccu2026pass');
+  const [nickname, setNickname] = useState<string>('');
   const [selectedZone, setSelectedZone] = useState<CampusZone>('downhill');
-  const [selectedGender, setSelectedGender] = useState<'undisclosed' | 'female' | 'male'>('female');
+  const [selectedGender, setSelectedGender] = useState<'undisclosed' | 'female' | 'male'>('undisclosed');
 
-  // Step 3: Payment Bindings (Optional)
+  // Step 3: Preferred Offline / Transfer Payment Methods (Optional)
   const [selectedGateways, setSelectedGateways] = useState<string[]>(['line_pay', 'jko_pay']);
 
-  const handleSendOtp = () => {
-    if (!email.endsWith('@nccu.edu.tw') && !email.endsWith('@g.nccu.edu.tw')) {
-      setEmailError(lang === 'zh' 
-        ? '請輸入有效的政大學生信箱 (@g.nccu.edu.tw 或 @nccu.edu.tw)' 
-        : 'Please enter a valid NCCU webmail (@g.nccu.edu.tw or @nccu.edu.tw)');
-      return;
-    }
-    setEmailError('');
-    setOtpSent(true);
-  };
+  const handleNccuGoogleSignIn = async () => {
+    setAuthError('');
+    setIsSigningIn(true);
 
-  const handleVerifyStep1 = () => {
-    if (!email.endsWith('@nccu.edu.tw') && !email.endsWith('@g.nccu.edu.tw')) {
-      setEmailError(lang === 'zh' ? '信箱網域必須為政大官方 Webmail' : 'Requires NCCU webmail domain');
-      return;
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+      const email = user.email?.trim() || '';
+
+      if (!email.toLowerCase().endsWith('@g.nccu.edu.tw')) {
+        await signOut(auth);
+        setAuthError(
+          lang === 'zh'
+            ? '僅限政大學生信箱 (@g.nccu.edu.tw)'
+            : '僅限政大學生信箱 (@g.nccu.edu.tw) — Only @g.nccu.edu.tw accounts allowed'
+        );
+        return;
+      }
+
+      setVerifiedUid(user.uid);
+      setVerifiedEmail(email);
+      setVerifiedAvatar(user.photoURL || '');
+      if (!nickname.trim()) {
+        setNickname(user.displayName?.trim() || email.split('@')[0]);
+      }
+      setStep(2);
+    } catch (err: unknown) {
+      const code =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code?: string }).code)
+          : '';
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        setAuthError(
+          lang === 'zh'
+            ? '已取消 Google 登入視窗，請再試一次。'
+            : 'Google sign-in popup closed. Please try again.'
+        );
+      } else {
+        setAuthError(
+          lang === 'zh'
+            ? 'Google 登入驗證失敗，請確認網路連線或稍後再試。'
+            : 'Google sign-in failed. Please try again.'
+        );
+      }
+    } finally {
+      setIsSigningIn(false);
     }
-    if (otpCode.trim().length !== 6) {
-      setEmailError(lang === 'zh' ? '請輸入 6 位數驗證碼' : 'Enter 6-digit OTP code');
-      return;
-    }
-    setEmailError('');
-    setStep(2);
   };
 
   const handleVerifyStep2 = () => {
@@ -68,10 +102,15 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
   };
 
   const handleFinish = (withPayment: boolean) => {
+    const emailPrefix = verifiedEmail.split('@')[0] || 'nccu_student';
     onComplete({
-      nccuEmail: email,
+      id: verifiedUid || undefined,
+      nccuEmail: verifiedEmail,
+      studentId: emailPrefix,
       nickname: nickname.trim(),
       name: nickname.trim(),
+      nameEn: nickname.trim(),
+      avatar: verifiedAvatar || undefined,
       gender: selectedGender,
       zone: selectedZone,
       isVerifiedStudent: true,
@@ -81,29 +120,27 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
 
   const toggleGateway = (gatewayId: string) => {
     if (selectedGateways.includes(gatewayId)) {
-      setSelectedGateways(selectedGateways.filter(g => g !== gatewayId));
+      setSelectedGateways(selectedGateways.filter((g) => g !== gatewayId));
     } else {
       setSelectedGateways([...selectedGateways, gatewayId]);
     }
   };
 
   const paymentOptions = [
-    { id: 'jko_pay', name: '街口支付 (JKOPAY)', desc: '台灣大專生覆蓋率最高', icon: '⚡' },
-    { id: 'taiwan_pay', name: '台灣 Pay', desc: '公私立大學金融卡綁定', icon: '🏛️' },
-    { id: 'line_pay', name: 'Line Pay', desc: '社群即時快速預授權', icon: '💬' },
-    { id: 'credit_card', name: '信用卡 / 學生金融卡', desc: '國際 Visa / Mastercard', icon: '💳' },
+    { id: 'jko_pay', name: '街口支付 (JKOPAY)', desc: '線下或聊天室轉帳確認', icon: '⚡' },
+    { id: 'taiwan_pay', name: '台灣 Pay', desc: '學生金融卡即時轉帳', icon: '🏛️' },
+    { id: 'line_pay', name: 'Line Pay', desc: '好友轉帳與現場掃碼', icon: '💬' },
+    { id: 'cash_meetup', name: '面交現金', desc: '校園碰面現場點清付款', icon: '💵' },
   ];
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col justify-between items-center p-4 sm:p-6 font-sans relative">
       {/* Top Bar with fixed Bilingual Toggle */}
       <header className="w-full max-w-4xl flex items-center justify-between py-2">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center font-bold text-sm shadow-xs">
-            NL
-          </div>
+        <div className="flex items-center gap-3">
+          <NccuLoopLogo size="sm" />
           <span className="font-bold text-slate-900 text-sm tracking-tight hidden sm:inline">
-            {lang === 'zh' ? APP_CONFIG.appName : APP_CONFIG.appNameEn}
+            {lang === 'zh' ? '政大圈圈' : APP_CONFIG.appNameEn}
           </span>
         </div>
 
@@ -123,11 +160,11 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 sm:p-8 space-y-6">
           {/* Brand Header */}
           <div className="text-center space-y-2">
-            <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-slate-900 text-white font-bold text-lg shadow-xs mb-1">
-              NL
+            <div className="flex justify-center mb-1">
+              <NccuLoopLogo size="lg" />
             </div>
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              {lang === 'zh' ? APP_CONFIG.appName : APP_CONFIG.appNameEn}
+              {lang === 'zh' ? '政大圈圈' : APP_CONFIG.appNameEn}
             </h1>
             <p className="text-xs text-slate-500 leading-relaxed max-w-xs mx-auto">
               {lang === 'zh' ? APP_CONFIG.tagline : APP_CONFIG.taglineEn}
@@ -143,87 +180,86 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                   step === s
                     ? 'w-8 bg-emerald-600'
                     : step > s
-                    ? 'w-4 bg-slate-800'
-                    : 'w-4 bg-slate-200'
+                      ? 'w-4 bg-slate-800'
+                      : 'w-4 bg-slate-200'
                 }`}
               />
             ))}
           </div>
 
-          {/* STEP 1: NCCU Webmail Verification */}
+          {/* STEP 1: Firebase Google Authentication (@g.nccu.edu.tw) */}
           {step === 1 && (
-            <div className="space-y-4 pt-1 animate-in fade-in duration-150">
+            <div className="space-y-5 pt-1 animate-in fade-in duration-150">
               <div className="space-y-1">
                 <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-800">
                   STEP 1 / 3
                 </span>
                 <h2 className="text-base font-bold text-slate-900">
-                  {lang === 'zh' ? '政大專屬身分驗證' : 'NCCU Webmail Verification'}
+                  {lang === 'zh' ? '政大專屬身分驗證' : 'NCCU Google Verification'}
                 </h2>
                 <p className="text-[11px] text-slate-500 leading-relaxed">
                   {lang === 'zh'
-                    ? '為維持高信任度與互助履約，限政大學生信箱驗證註冊。'
-                    : 'Requires verified NCCU student webmail to access campus network.'}
+                    ? '採用 Google OAuth 實名驗證，僅限政大學生信箱 (@g.nccu.edu.tw) 登入使用。'
+                    : 'Verified via Google Sign-In. Restricted exclusively to @g.nccu.edu.tw student accounts.'}
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <label className="block text-xs font-semibold text-slate-700">
-                  {lang === 'zh' ? '政大學生信箱' : 'NCCU Email Address'}
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="學號@g.nccu.edu.tw"
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900 focus:bg-white transition-all font-mono"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSendOtp}
-                    className="px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold whitespace-nowrap cursor-pointer transition-colors shadow-2xs"
-                  >
-                    {lang === 'zh' ? '發送驗證碼' : 'Send OTP'}
-                  </button>
-                </div>
-                {emailError && (
-                  <p className="text-[11px] text-rose-600 font-medium">{emailError}</p>
-                )}
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center gap-2.5 text-[11px] text-slate-600">
+                <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span>
+                  {lang === 'zh'
+                    ? '系統將自動檢核網域，非 @g.nccu.edu.tw 帳號會立即登出攔截。'
+                    : 'Non-@g.nccu.edu.tw accounts are automatically rejected and signed out.'}
+                </span>
               </div>
 
-              {otpSent && (
-                <div className="space-y-1.5 pt-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <label className="font-semibold text-slate-700">
-                      {lang === 'zh' ? '6 位數 OTP 驗證碼' : '6-Digit OTP Code'}
-                    </label>
-                    <span className="text-[10px] text-emerald-700 font-medium">
-                      ✓ {lang === 'zh' ? '模擬驗證碼已寄發' : 'Demo OTP Ready'}
-                    </span>
-                  </div>
-                  <input
-                    type="text"
-                    maxLength={6}
-                    value={otpCode}
-                    onChange={(e) => setOtpCode(e.target.value)}
-                    placeholder="849201"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-center font-mono font-bold tracking-widest text-sm text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-600 focus:bg-white transition-all"
-                  />
-                  <p className="text-[10px] text-slate-400 text-center">
-                    {lang === 'zh' ? '（輸入任意 6 碼或點擊下一步即可通過驗證）' : '(Enter any 6 digits to verify)'}
-                  </p>
-                </div>
-              )}
+              <div className="space-y-2.5">
+                <button
+                  type="button"
+                  onClick={handleNccuGoogleSignIn}
+                  disabled={isSigningIn}
+                  className="w-full py-3.5 px-4 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center justify-center gap-2.5"
+                >
+                  {isSigningIn ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  ) : (
+                    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        fill="#4285F4"
+                        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 24c3.3 0 6.08-1.09 8.1-2.96l-3.88-3.05c-1.1.74-2.51 1.18-4.22 1.18-3.24 0-5.99-2.19-6.97-5.14H1.02v3.14C3.03 21.17 7.19 24 12 24Z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.03 14.03c-.25-.74-.39-1.54-.39-2.36 0-.82.14-1.62.39-2.36V6.17H1.02C.37 7.47 0 8.95 0 10.67c0 1.72.37 3.2 1.02 4.5l4.01-3.14Z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 4.75c1.8 0 3.41.62 4.68 1.83l3.51-3.51C18.07 1.19 15.3 0 12 0 7.19 0 3.03 2.83 1.02 7.03l4.01 3.14c.98-2.95 3.73-5.14 6.97-5.14Z"
+                      />
+                    </svg>
+                  )}
+                  <span>
+                    {isSigningIn
+                      ? lang === 'zh'
+                        ? '正在驗證政大 Google 帳號...'
+                        : 'Verifying NCCU Google Account...'
+                      : lang === 'zh'
+                        ? '使用政大 Google 帳號登入 (Sign in with NCCU Google)'
+                        : 'Sign in with NCCU Google (@g.nccu.edu.tw)'}
+                  </span>
+                </button>
 
-              <button
-                type="button"
-                onClick={handleVerifyStep1}
-                className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center justify-center gap-2 mt-2"
-              >
-                <span>{lang === 'zh' ? '驗證信箱並前往步驟 2' : 'Verify & Continue'}</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
+                {authError && (
+                  <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 flex items-center gap-2 text-rose-700 text-xs font-semibold">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>{authError}</span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -237,42 +273,30 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                 <h2 className="text-base font-bold text-slate-900">
                   {lang === 'zh' ? '建立個人檔案' : 'Create Profile'}
                 </h2>
-                <p className="text-[11px] text-slate-500 leading-relaxed">
-                  {lang === 'zh'
-                    ? '設定校內暱稱與安全密碼，選填個人校園偏好。'
-                    : 'Set up your nickname, password, and campus preferences.'}
-                </p>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-[11px] font-mono font-semibold text-emerald-800">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span className="truncate">{verifiedEmail}</span>
+                </div>
               </div>
 
-              {/* Required: Nickname & Password */}
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    {lang === 'zh' ? '校園暱稱 (必填)' : 'Nickname (Required)'}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={nickname}
-                    onChange={(e) => setNickname(e.target.value)}
-                    placeholder="例如：政大巧芸、山道小騎士"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900 focus:bg-white transition-all"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    {lang === 'zh' ? '設定密碼 (必填)' : 'Password (Required)'}
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="至少 6 位密碼"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900 focus:bg-white transition-all font-mono"
-                  />
-                </div>
+              {/* Required: Nickname (Pre-filled from Google Display Name) */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  {lang === 'zh' ? '校園暱稱 (必填)' : 'Nickname (Required)'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={nickname}
+                  onChange={(e) => setNickname(e.target.value)}
+                  placeholder={lang === 'zh' ? '例如：政大巧芸、山道小騎士' : 'e.g. Audrey Chen'}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900 focus:bg-white transition-all"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  {lang === 'zh'
+                    ? '已自動帶入您的 Google 顯示名稱作為預設建議，可自由修改。'
+                    : 'Pre-filled from your Google profile name; feel free to customize.'}
+                </p>
               </div>
 
               {/* Optional: Language Capsule Buttons */}
@@ -283,7 +307,9 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => { if (lang !== 'zh') onToggleLang(); }}
+                    onClick={() => {
+                      if (lang !== 'zh') onToggleLang();
+                    }}
                     className={`py-2 px-3 rounded-xl border text-xs font-medium cursor-pointer transition-all ${
                       lang === 'zh'
                         ? 'bg-slate-900 text-white border-slate-900 font-bold shadow-2xs'
@@ -294,7 +320,9 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => { if (lang !== 'en') onToggleLang(); }}
+                    onClick={() => {
+                      if (lang !== 'en') onToggleLang();
+                    }}
                     className={`py-2 px-3 rounded-xl border text-xs font-medium cursor-pointer transition-all ${
                       lang === 'en'
                         ? 'bg-slate-900 text-white border-slate-900 font-bold shadow-2xs'
@@ -352,7 +380,9 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                     <button
                       key={g.id}
                       type="button"
-                      onClick={() => setSelectedGender(g.id as any)}
+                      onClick={() =>
+                        setSelectedGender(g.id as 'undisclosed' | 'female' | 'male')
+                      }
                       className={`py-2 px-2 rounded-xl border text-xs text-center cursor-pointer transition-all ${
                         selectedGender === g.id
                           ? 'bg-slate-900 text-white border-slate-900 font-bold shadow-2xs'
@@ -380,14 +410,14 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                   onClick={handleVerifyStep2}
                   className="flex-1 py-3 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
                 >
-                  <span>{lang === 'zh' ? '前往步驟 3 (金流)' : 'Next Step (Payment)'}</span>
+                  <span>{lang === 'zh' ? '前往步驟 3 (付款偏好)' : 'Next Step (Payment)'}</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
           )}
 
-          {/* STEP 3: Preferred Payment & Escrow Setup (Optional) */}
+          {/* STEP 3: Preferred Payment Setup (Optional) */}
           {step === 3 && (
             <div className="space-y-4 pt-1 animate-in fade-in duration-150">
               <div className="space-y-1">
@@ -395,16 +425,15 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                   STEP 3 / 3
                 </span>
                 <h2 className="text-base font-bold text-slate-900">
-                  {lang === 'zh' ? '偏好的支付與收款方式' : 'Optional Payment Setup'}
+                  {lang === 'zh' ? '偏好的支付與收款方式' : 'Preferred Payment Methods'}
                 </h2>
                 <p className="text-[11px] text-slate-500 leading-relaxed">
                   {lang === 'zh'
-                    ? '可先行綁定，發布付費任務或接單收款時自動履約；亦可稍後再綁定。'
-                    : 'Bind preferred payment gateway for escrow or skip to browse freely.'}
+                    ? '本平台採「線下現金 / 事前轉帳雙向確認制」，不會自動扣款。勾選常用工具供發單快速預填：'
+                    : 'Uses offline/manual P2P payment confirmation (no auto-charge). Select preferred methods:'}
                 </p>
               </div>
 
-              {/* Supported Escrow Gateways */}
               <div className="space-y-2">
                 {paymentOptions.map((opt) => {
                   const isChecked = selectedGateways.includes(opt.id);
@@ -428,7 +457,7 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                       <input
                         type="checkbox"
                         checked={isChecked}
-                        onChange={() => {}} // Handled by container onClick
+                        onChange={() => {}}
                         className="accent-emerald-600 w-4 h-4 cursor-pointer"
                       />
                     </div>
@@ -436,7 +465,6 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                 })}
               </div>
 
-              {/* Action Buttons: 先綁定 or 稍後再說，直接進入大廳 */}
               <div className="space-y-2 pt-2">
                 <button
                   type="button"
@@ -444,7 +472,7 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                   className="w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>{lang === 'zh' ? '先綁定，完成設置進入大廳' : 'Bind & Enter NCCU Loop'}</span>
+                  <span>{lang === 'zh' ? '儲存偏好，進入大廳' : 'Save & Enter NCCU Loop'}</span>
                 </button>
 
                 <button
@@ -470,16 +498,21 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
         </div>
       </main>
 
-      {/* Tiny unobtrusive Quick Demo Login Link at bottom corner */}
+      {/* Footer with environment-gated Demo Quick Login (Hidden in Production Builds) */}
       <footer className="w-full max-w-4xl flex items-center justify-between py-2 text-[11px] text-slate-400">
         <span>© 2026 {APP_CONFIG.appNameEn} · National Chengchi University</span>
-        <button
-          onClick={onQuickDemoLogin}
-          className="text-slate-400 hover:text-slate-700 underline underline-offset-2 transition-colors cursor-pointer"
-          title="以測試帳號 (Audrey Chen) 快速登入"
-        >
-          {lang === 'zh' ? '⚡ Demo 快速登入' : '⚡ Quick Demo Login'}
-        </button>
+        <div className="flex items-center gap-3">
+          <span>{lang === 'zh' ? '政大 Google OAuth 實名驗證' : 'Verified NCCU Google Auth'}</span>
+          {isDemoEnabled && onQuickDemoLogin && (
+            <button
+              type="button"
+              onClick={onQuickDemoLogin}
+              className="text-[11px] text-slate-400 hover:text-slate-600 underline underline-offset-2 cursor-pointer"
+            >
+              {lang === 'zh' ? 'Demo 快速登入' : 'Quick Demo Login'}
+            </button>
+          )}
+        </div>
       </footer>
     </div>
   );

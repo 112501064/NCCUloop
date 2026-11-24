@@ -1,0 +1,146 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "NCCU verified student private profile stored under users/{userId}",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "nccuEmail": { "type": "string", "format": "email", "maxLength": 128, "pattern": "^[a-zA-Z0-9._%+\\-]+@g\\.nccu\\.edu\\.tw$" },
+        "studentId": { "type": "string", "maxLength": 64 },
+        "nickname": { "type": "string", "maxLength": 64 },
+        "department": { "type": "string", "maxLength": 64 },
+        "year": { "type": "string", "maxLength": 32 },
+        "dormLocation": { "type": "string", "maxLength": 64 },
+        "bio": { "type": "string", "maxLength": 300 },
+        "gender": { "type": "string", "enum": ["female", "male", "undisclosed", "other"] },
+        "zone": { "type": "string", "enum": ["downhill", "uphill", "dorms", "off_campus"] },
+        "canTutorSubjects": { "type": "array" },
+        "subscribedTags": { "type": "array" },
+        "trustScore": { "type": "number" },
+        "completedTasks": { "type": "number" },
+        "isVerifiedStudent": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "nccuEmail", "nickname", "isVerifiedStudent", "updatedAt"]
+    },
+    "TaskItem": {
+      "title": "TaskItem",
+      "description": "Real-time campus mutual-aid task stored in tasks/{taskId}",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 160 },
+        "titleEn": { "type": "string", "maxLength": 160 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "descriptionEn": { "type": "string", "maxLength": 2000 },
+        "category": { "type": "string", "enum": ["leftovers", "emergency", "traffic", "marketplace", "rental", "tutor", "skill", "group_buy"] },
+        "location": { "type": "string", "maxLength": 100 },
+        "locationZone": { "type": "string", "enum": ["downhill", "uphill", "dorms", "off_campus"] },
+        "locationLat": { "type": "number" },
+        "locationLng": { "type": "number" },
+        "price": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["cash_meetup", "pre_transfer", "free_aid"] },
+        "paymentNote": { "type": "string", "maxLength": 200 },
+        "payerRole": { "type": "string", "enum": ["creator", "fulfiller"] },
+        "quantity": { "type": "number" },
+        "totalQuota": { "type": "number" },
+        "isAnonymous": { "type": "boolean" },
+        "femaleOnlyRecommended": { "type": "boolean" },
+        "tags": { "type": "array" },
+        "creatorUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "creatorName": { "type": "string", "maxLength": 64 },
+        "creatorEmail": { "type": "string", "maxLength": 128 },
+        "creatorTrustScore": { "type": "number" },
+        "status": { "type": "string", "enum": ["open", "in_progress", "completed", "closed", "expired", "cancelled"] },
+        "timeOption": { "type": "string", "maxLength": 32 },
+        "remainingMinutes": { "type": "number" },
+        "expireAt": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "description", "category", "location", "price", "paymentMethod", "isAnonymous", "creatorUid", "creatorName", "creatorEmail", "status", "createdAt", "updatedAt", "expireAt"]
+    },
+    "OrderItem": {
+      "title": "OrderItem",
+      "description": "Active task claim / 1-on-1 chat room stored in orders/{orderId}",
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "taskTitle": { "type": "string", "maxLength": 160 },
+        "taskLocation": { "type": "string", "maxLength": 100 },
+        "taskPrice": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["cash_meetup", "pre_transfer", "free_aid"] },
+        "paymentNote": { "type": "string", "maxLength": 200 },
+        "payerRole": { "type": "string", "enum": ["creator", "fulfiller"] },
+        "taskExpireAt": { "type": "number" },
+        "creatorUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "creatorName": { "type": "string", "maxLength": 64 },
+        "creatorAnonymous": { "type": "boolean" },
+        "accepterUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "accepterName": { "type": "string", "maxLength": 64 },
+        "accepterAnonymous": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["pending_confirm", "in_progress", "completed", "disputed", "cancelled"] },
+        "creatorPaidConfirmed": { "type": "boolean" },
+        "accepterPaidConfirmed": { "type": "boolean" },
+        "creatorDoneConfirmed": { "type": "boolean" },
+        "accepterDoneConfirmed": { "type": "boolean" },
+        "revealCreator": { "type": "boolean" },
+        "revealAccepter": { "type": "boolean" },
+        "disputeReason": { "type": "string", "maxLength": 1000 },
+        "disputedByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["taskId", "taskTitle", "taskLocation", "taskPrice", "paymentMethod", "creatorUid", "creatorName", "creatorAnonymous", "accepterUid", "accepterName", "accepterAnonymous", "status", "creatorPaidConfirmed", "accepterPaidConfirmed", "creatorDoneConfirmed", "accepterDoneConfirmed", "revealCreator", "revealAccepter", "createdAt", "updatedAt"]
+    },
+    "OrderMessage": {
+      "title": "OrderMessage",
+      "description": "1-on-1 real-time message under orders/{orderId}/messages/{messageId}",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "maxLength": 1000 },
+        "senderUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "senderName": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["text", "senderUid", "senderName", "createdAt"]
+    },
+    "ReportItem": {
+      "title": "ReportItem",
+      "description": "Dispute or abuse report stored under reports/{reportId}",
+      "type": "object",
+      "properties": {
+        "orderId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "taskId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "reporterUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "reasonCategory": { "type": "string", "enum": ["no_show", "harassment", "malicious_cancel", "fraud", "other"] },
+        "description": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["frozen_escrow", "resolved", "dismissed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["orderId", "taskId", "reporterUid", "reasonCategory", "description", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private verified NCCU student profile (owner-only read/write)"
+    },
+    "/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/TaskItem" },
+      "description": "Real-time campus mutual-aid tasks"
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/OrderItem" },
+      "description": "Order & 1-on-1 chat room metadata for task creator and accepter"
+    },
+    "/orders/{orderId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/OrderMessage" },
+      "description": "Real-time 1-on-1 messages scoped to participants of the parent order"
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/ReportItem" },
+      "description": "Dispute and safety reports created by verified NCCU reporters"
+    }
+  }
+}

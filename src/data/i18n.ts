@@ -10,14 +10,16 @@ export const I18N = {
     dorms: '宿舍區',
     allZones: '全校區',
     
-    // 4 Core Tabs (減法設計，僅保留 4 個核心 Tab)
+    // 5 Core Tabs
     tabFeed: '大廳',
+    tabFlash: '快閃/急件',
     tabChats: '訊息',
     tabPost: '發布',
     tabProfile: '個人',
     
     // Top dynamic pill filters
     pillAll: '全部',
+    pillRecommended: '追蹤推薦',
     pillLeftovers: '即時剩食',
     pillEmergency: '緊急求救',
     pillTraffic: '交通',
@@ -86,14 +88,16 @@ export const I18N = {
     dorms: 'Dorms Area',
     allZones: 'All Zones',
     
-    // 4 Core Tabs
+    // 5 Core Tabs
     tabFeed: 'Feed',
+    tabFlash: 'Flash',
     tabChats: 'Chats',
     tabPost: 'Post',
     tabProfile: 'Profile',
     
     // Top dynamic pill filters
     pillAll: 'All',
+    pillRecommended: 'For You',
     pillLeftovers: 'Leftovers',
     pillEmergency: 'Emergency SOS',
     pillTraffic: 'Traffic',

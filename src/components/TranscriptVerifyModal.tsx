@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserProfile } from '../types';
-import { X, FileText, CheckCircle2, Sparkles, Upload, ArrowRight } from 'lucide-react';
+import { X, FileText, CheckCircle2, Sparkles, Upload } from 'lucide-react';
 
 interface TranscriptVerifyModalProps {
   isOpen: boolean;
@@ -15,21 +15,34 @@ export const TranscriptVerifyModal: React.FC<TranscriptVerifyModalProps> = ({
   currentUser,
   onVerifiedSuccess,
 }) => {
-  if (!isOpen) return null;
-
   const [analyzing, setAnalyzing] = useState<boolean>(false);
   const [success, setSuccess] = useState<boolean>(false);
-  const [targetSubject, setTargetSubject] = useState<string>('COMM2001 - 總體經濟學 (商學院必修)');
+  const [targetSubject, setTargetSubject] = useState<string>('');
+  const [selectedFileName, setSelectedFileName] = useState<string>('nccu_transcript_sample.png');
+
+  if (!isOpen) return null;
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedFileName(file.name);
+    }
+  };
 
   const handleSimulateOCR = () => {
+    const trimmed = targetSubject.trim();
+    if (!trimmed) return;
+
     setAnalyzing(true);
     setTimeout(() => {
       setAnalyzing(false);
       setSuccess(true);
       setTimeout(() => {
-        onVerifiedSuccess('COMM2001', '總體經濟學');
-      }, 1200);
-    }, 1500);
+        onVerifiedSuccess('VERIFIED', trimmed);
+        setSuccess(false);
+        setTargetSubject('');
+      }, 950);
+    }, 1100);
   };
 
   return (
@@ -39,10 +52,10 @@ export const TranscriptVerifyModal: React.FC<TranscriptVerifyModalProps> = ({
         <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
           <div>
             <div className="text-[11px] font-mono text-emerald-700 font-bold uppercase tracking-wider">
-              MULTIMODAL AI OCR ENGINE
+              SKILL &amp; TRANSCRIPT VERIFICATION
             </div>
             <h3 className="text-base font-bold text-slate-900">
-              政大教務系統成績單 OCR 資格自動認證
+              上傳修課證明 / 專長認證截圖
             </h3>
           </div>
           <button
@@ -55,62 +68,73 @@ export const TranscriptVerifyModal: React.FC<TranscriptVerifyModalProps> = ({
 
         <div className="p-6 space-y-4">
           <p className="text-slate-600 leading-relaxed">
-            申請高階家教或專業學門輔導任務時，AI 視覺模組透過政大教務系統截圖自動辨識課程代碼、學期修課紀錄與成績等第，核發專屬徽章。
+            可自由輸入欲認證的學科、語言檢定、軟體技能或運動項目，並上傳政大修課成績單或相關證照截圖完成標記。
           </p>
 
           <div>
-            <label className="block text-slate-700 font-semibold mb-1">欲認證輔導科目</label>
-            <select
+            <label className="block text-slate-700 font-semibold mb-1">
+              欲認證輔導項目 / 專長名稱（自由輸入）
+            </label>
+            <input
+              type="text"
               value={targetSubject}
               onChange={(e) => setTargetSubject(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-900"
-            >
-              <option value="COMM2001 - 總體經濟學 (商學院必修)">COMM2001 - 總體經濟學 (商學院必修)</option>
-              <option value="STAT1001 - 統計學 (一)">STAT1001 - 統計學 (一)</option>
-              <option value="MATH1002 - 微積分 (商管數統必修)">MATH1002 - 微積分 (商管數統必修)</option>
-              <option value="LAW1001 - 中華民國憲法與法學緒論">LAW1001 - 中華民國憲法與法學緒論</option>
-            </select>
+              placeholder="例如：微積分(甲)、日文 N1 檢定、羽球陪練、Premiere 剪輯..."
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900 focus:bg-white"
+            />
           </div>
 
           {/* Upload preview dropzone */}
-          <div className="border-2 border-dashed border-slate-300 rounded-xl p-5 text-center bg-slate-50/50 space-y-2">
+          <label className="block border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-xl p-5 text-center bg-slate-50/50 space-y-2 cursor-pointer transition-colors">
+            <input
+              type="file"
+              accept="image/*,.pdf"
+              onChange={handleFileChange}
+              className="hidden"
+            />
             <div className="w-10 h-10 bg-emerald-50 text-emerald-700 rounded-full flex items-center justify-center mx-auto">
-              <FileText className="w-5 h-5" />
+              <Upload className="w-5 h-5" />
             </div>
             <div>
-              <span className="font-semibold text-slate-800 block">nccu_transcript_sample.png</span>
-              <span className="text-[11px] text-slate-500">政大教務註冊組電子成績單截圖 (含防偽水印)</span>
+              <span className="font-semibold text-slate-800 flex items-center justify-center gap-1.5">
+                <FileText className="w-3.5 h-3.5 text-slate-500" />
+                {selectedFileName}
+              </span>
+              <span className="text-[11px] text-slate-500 block mt-0.5">
+                點擊選擇修課紀錄或證照截圖（支援 PNG / JPG / PDF）
+              </span>
             </div>
             <div className="text-[10px] text-slate-400 font-mono">
-              學號: {currentUser.studentId} · 姓名: {currentUser.name}
+              帳號: {currentUser.studentId} · 暱稱: {currentUser.nickname || currentUser.name}
             </div>
-          </div>
+          </label>
 
           {success ? (
-            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg space-y-2 text-emerald-900">
+            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-1.5 text-emerald-900">
               <div className="flex items-center gap-2 font-bold text-sm">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>OCR 辨識成功！通過授課資格核可</span>
+                <span>證明已送出並通過認證！</span>
               </div>
               <p className="text-[11px] text-emerald-800">
-                AI 辨識結果：<strong>COMM2001 總體經濟學 (等第: A+, 授課教師: 莊教授)</strong>，信賴度 98.4%，已自動開通家教應徵接單權限！
+                已將 <strong>{targetSubject}</strong> 加入您的個人專長認證徽章列表。
               </p>
             </div>
           ) : (
             <button
+              type="button"
               onClick={handleSimulateOCR}
-              disabled={analyzing}
-              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg transition-all shadow-sm cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+              disabled={analyzing || !targetSubject.trim()}
+              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition-all shadow-sm cursor-pointer disabled:opacity-40 flex items-center justify-center gap-2"
             >
               {analyzing ? (
                 <>
                   <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  <span>Gemini 2.5 Flash OCR 辨識中...</span>
+                  <span>正在核對修課證明截圖...</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="w-4 h-4 text-emerald-400" />
-                  <span>開始 AI 成績單驗證</span>
+                  <span>送出證明並新增認證項目</span>
                 </>
               )}
             </button>

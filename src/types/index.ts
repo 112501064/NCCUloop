@@ -35,14 +35,17 @@ export type PostStatus =
   | 'open'
   | 'pending_accept'     // 階段一：接單申請中（待發布者確認）
   | 'in_progress'        // 階段二：進行中 & 1-on-1 雙語聊天室開啟
-  | 'pending_completion' // 階段三：一方確認（24h 倒數）
-  | 'completed'          // 雙方確認結案 & 款項劃撥
+  | 'pending_completion' // 階段三：一方確認結案
+  | 'completed'          // 雙方確認結案 / 已領完
   | 'disputed'           // 申訴凍結中
   | 'cancelled'
-  | 'expired'
+  | 'closed'             // 名額歸零下架
+  | 'expired'            // 已過期（可一鍵重新上架）
   | 'refunded';
 
 export type PaymentMethod = 
+  | 'cash_meetup'  // 面交現金
+  | 'pre_transfer' // 事前轉帳（街口支付 / 台灣 Pay / Line Pay）
   | 'jko_pay'      // 街口支付 (JKOPAY)
   | 'taiwan_pay'   // 台灣 Pay
   | 'line_pay'     // Line Pay
@@ -67,6 +70,7 @@ export interface UserProfile {
   dormLocation: string;
   dormLocationEn: string;
   zone: CampusZone;
+  bio?: string;
   currentCoordinates: { lat: number; lng: number };
   isVerifiedStudent: boolean;
   trustScore: number;
@@ -99,9 +103,19 @@ export interface PostItem {
   rewardAmount: number; // NTD (0 for free)
   isNegotiable?: boolean;
   paymentMethod: PaymentMethod;
+  paymentNote?: string; // 選填：收款帳號或收款連結備註
+  payerRole?: 'creator' | 'fulfiller'; // 誰付款：求救任務為發布者付款；二手/共乘為接單者付款
+  payerMarkedPaid?: boolean; // 付款方已點擊「我已付款」
+  payeeConfirmedReceived?: boolean; // 收款方已點擊「確認已收到款項」
   escrowDeposit: number;
   
+  // Multi-quota system for leftovers & group_buy
+  totalQuota?: number;
+  remainingQuota?: number;
+  claimedByUserIds?: string[];
+  
   timeOption: TimeOption;
+  remainingMinutes?: number; // 用於 +30m 延時與動態倒數顯示
   timeRemainingText?: string;
   
   status: PostStatus;
@@ -131,6 +145,8 @@ export interface PostItem {
   
   createdAt: string;
   expiresAt: string;
+  createdAtMs?: number;
+  expireAtMs?: number;
   completedAt?: string;
   refundedAt?: string;
 }
@@ -187,3 +203,54 @@ export interface EscrowTransaction {
   updatedAt: string;
   refundReason?: string;
 }
+
+export type OrderStatus =
+  | 'pending_confirm'
+  | 'in_progress'
+  | 'completed'
+  | 'disputed'
+  | 'cancelled';
+
+export interface OrderItem {
+  id: string;
+  taskId: string;
+  taskTitle: string;
+  taskTitleEn?: string;
+  taskLocation: string;
+  taskLocationEn?: string;
+  taskPrice: number;
+  paymentMethod: PaymentMethod;
+  paymentNote?: string;
+  payerRole?: 'creator' | 'fulfiller';
+  taskExpireAt?: number;
+  creatorUid: string;
+  creatorName: string;
+  creatorEmail?: string;
+  creatorAnonymous: boolean;
+  creatorAnonAlias?: string;
+  accepterUid: string;
+  accepterName: string;
+  accepterAnonymous: boolean;
+  accepterAnonAlias?: string;
+  status: OrderStatus;
+  creatorPaidConfirmed: boolean;
+  accepterPaidConfirmed: boolean;
+  creatorDoneConfirmed: boolean;
+  accepterDoneConfirmed: boolean;
+  revealCreator: boolean;
+  revealAccepter: boolean;
+  disputeReason?: string;
+  disputedByUid?: string;
+  createdAtMs?: number;
+  updatedAtMs?: number;
+}
+
+export interface OrderMessage {
+  id: string;
+  text: string;
+  senderUid: string;
+  senderName: string;
+  createdAtMs?: number;
+  timestampText?: string;
+}
+

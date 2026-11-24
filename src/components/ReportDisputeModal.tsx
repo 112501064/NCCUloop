@@ -1,36 +1,41 @@
 import React, { useState } from 'react';
-import { PostItem, UserProfile, DisputeCategory, Language } from '../types';
+import { OrderItem, UserProfile, DisputeCategory, Language } from '../types';
 import { I18N } from '../data/i18n';
-import { X, AlertTriangle, ShieldAlert, Lock, CheckCircle2 } from 'lucide-react';
+import { X, AlertTriangle, ShieldAlert, Lock } from 'lucide-react';
 
 interface ReportDisputeModalProps {
   isOpen: boolean;
   onClose: () => void;
-  post: PostItem;
+  order: OrderItem;
   currentUser: UserProfile;
-  onSubmitDispute: (postId: string, category: DisputeCategory, description: string) => void;
+  onSubmitDispute: (order: OrderItem, category: DisputeCategory, description: string) => Promise<void> | void;
   lang: Language;
 }
 
 export const ReportDisputeModal: React.FC<ReportDisputeModalProps> = ({
   isOpen,
   onClose,
-  post,
+  order,
   currentUser,
   onSubmitDispute,
   lang,
 }) => {
-  if (!isOpen) return null;
-
-  const t = I18N[lang];
   const [category, setCategory] = useState<DisputeCategory>('no_show');
   const [description, setDescription] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  const isCreator = currentUser.id === post.creatorId;
-  const targetUserName = isCreator 
-    ? (post.fulfillerName || '接單同學')
-    : post.creatorName;
+  if (!isOpen) return null;
+
+  const t = I18N[lang];
+  const isCreator = currentUser.id === order.creatorUid;
+  const bothRevealed = order.revealCreator && order.revealAccepter;
+  const targetUserName = isCreator
+    ? bothRevealed || !order.accepterAnonymous
+      ? order.accepterName
+      : order.accepterAnonAlias || '匿名接單同學'
+    : bothRevealed || !order.creatorAnonymous
+      ? order.creatorName
+      : order.creatorAnonAlias || '匿名發布者';
 
   const categories: { id: DisputeCategory; label: string }[] = [
     { id: 'harassment', label: t.disputeHarassment },
@@ -40,14 +45,16 @@ export const ReportDisputeModal: React.FC<ReportDisputeModalProps> = ({
     { id: 'other', label: t.disputeOther },
   ];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    setTimeout(() => {
-      onSubmitDispute(post.id, category, description || '檢舉申訴提交');
-      setIsSubmitting(false);
+    try {
+      await onSubmitDispute(order, category, description.trim() || '檢舉申訴提交');
+      setDescription('');
       onClose();
-    }, 600);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -58,11 +65,9 @@ export const ReportDisputeModal: React.FC<ReportDisputeModalProps> = ({
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-rose-400" />
             <div>
-              <h3 className="text-sm font-bold">
-                {t.disputeTitle}
-              </h3>
+              <h3 className="text-sm font-bold">{t.disputeTitle}</h3>
               <p className="text-[11px] text-rose-200">
-                對象：{targetUserName} · 訂單 #{post.id.slice(0, 10)}
+                對象：{targetUserName} · 訂單 #{order.id.slice(0, 10)}
               </p>
             </div>
           </div>
@@ -74,13 +79,13 @@ export const ReportDisputeModal: React.FC<ReportDisputeModalProps> = ({
           </button>
         </div>
 
-        {/* Warning Policy Banner */}
+        {/* Policy Banner */}
         <div className="p-3 bg-amber-50 border-b border-amber-200 text-amber-950 flex items-start gap-2">
           <Lock className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
           <p className="text-[11px] leading-relaxed">
             {lang === 'zh'
-              ? '提交申訴後，系統將立即「凍結該筆預扣託管款項」，並暫停被檢舉者接單權限。AI 仲裁日誌將比對雙方聊天紀錄與位置歷程進行判定。'
-              : 'Filing a dispute immediately freezes the escrow payment and suspends the respondent\'s claiming rights. AI arbitration logs will cross-examine chat history and geolocation.'}
+              ? '提交申訴後，訂單狀態將即時標記為「爭議凍結」，並留存雙方對話紀錄供校園管理端查核。'
+              : 'Filing a dispute immediately flags this order as disputed and preserves chat logs for review.'}
           </p>
         </div>
 
@@ -89,7 +94,7 @@ export const ReportDisputeModal: React.FC<ReportDisputeModalProps> = ({
           <div>
             <label className="block text-slate-700 font-bold mb-1.5">{t.disputeReason}</label>
             <div className="space-y-1.5">
-              {categories.map(cat => (
+              {categories.map((cat) => (
                 <label
                   key={cat.id}
                   className={`flex items-center gap-2.5 p-2 rounded-lg border cursor-pointer transition-colors ${
@@ -119,12 +124,15 @@ export const ReportDisputeModal: React.FC<ReportDisputeModalProps> = ({
               rows={3}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder={lang === 'zh' ? '請簡述事發經過、約定時間與具體違約情形...' : 'Describe timeline, agreed time, and specific violation...'}
+              placeholder={
+                lang === 'zh'
+                  ? '請簡述事發經過、約定時間與具體問題...'
+                  : 'Describe timeline, agreed time, and specific issue...'
+              }
               className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-rose-700"
             />
           </div>
 
-          {/* Action buttons */}
           <div className="pt-2 flex items-center justify-end gap-2">
             <button
               type="button"
@@ -139,11 +147,11 @@ export const ReportDisputeModal: React.FC<ReportDisputeModalProps> = ({
               className="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
             >
               {isSubmitting ? (
-                <span>處理中...</span>
+                <span>{lang === 'zh' ? '送出中...' : 'Submitting...'}</span>
               ) : (
                 <>
                   <ShieldAlert className="w-3.5 h-3.5" />
-                  <span>{t.submitDispute}</span>
+                  <span>{lang === 'zh' ? '送出舉報並標記爭議' : 'Submit Report'}</span>
                 </>
               )}
             </button>

@@ -1,10 +1,17 @@
-import React from 'react';
-import { PostItem, UserProfile, Language } from '../types';
+import React, { useState } from 'react';
+import { PostItem, OrderItem, UserProfile, Language } from '../types';
 import { calculateHaversineDistanceMeters, formatDistance } from '../utils/lbs';
+import { formatPaymentMethodLabel, formatRemainingMinutes } from '../utils/formatters';
 import { I18N } from '../data/i18n';
-import { 
-  X, MapPin, Clock, CreditCard, ShieldAlert, 
-  MessageSquare, CheckCircle2, UserCheck, AlertTriangle
+import {
+  X,
+  MapPin,
+  Clock,
+  ShieldAlert,
+  MessageSquare,
+  CreditCard,
+  Users,
+  Loader2,
 } from 'lucide-react';
 
 interface TaskDetailModalProps {
@@ -12,11 +19,9 @@ interface TaskDetailModalProps {
   onClose: () => void;
   post: PostItem;
   currentUser: UserProfile;
-  onApplyAcceptPost: (postId: string) => { success: boolean; message: string; reasonCode?: string };
-  onApproveFulfiller: (postId: string) => void;
-  onOpenChat: (post: PostItem) => void;
-  onConfirmCompletion: (postId: string) => void;
-  onRefundPost: (postId: string) => void;
+  existingOrder?: OrderItem | null;
+  onApplyAcceptPost: (postId: string) => Promise<{ success: boolean; message: string; order?: OrderItem }>;
+  onOpenOrderChat: (order: OrderItem) => void;
   lang: Language;
 }
 
@@ -25,13 +30,13 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   onClose,
   post,
   currentUser,
+  existingOrder,
   onApplyAcceptPost,
-  onApproveFulfiller,
-  onOpenChat,
-  onConfirmCompletion,
-  onRefundPost,
+  onOpenOrderChat,
   lang,
 }) => {
+  const [isApplying, setIsApplying] = useState<boolean>(false);
+
   if (!isOpen) return null;
   const t = I18N[lang];
 
@@ -41,6 +46,30 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   );
   const formattedDist = formatDistance(distanceMeters);
   const isMyPost = post.creatorId === currentUser.id;
+  const hasQuota = post.totalQuota !== undefined && post.remainingQuota !== undefined;
+  const isSoldOut = hasQuota && (post.remainingQuota ?? 0) <= 0;
+
+  const displayTime =
+    post.remainingMinutes !== undefined
+      ? formatRemainingMinutes(post.remainingMinutes, lang)
+      : post.timeRemainingText || post.expiresAt;
+
+  const paymentLabel = formatPaymentMethodLabel(post.paymentMethod, lang);
+
+  const handleClaim = async () => {
+    setIsApplying(true);
+    try {
+      const res = await onApplyAcceptPost(post.id);
+      if (res.success) {
+        onClose();
+        if (res.order) {
+          onOpenOrderChat(res.order);
+        }
+      }
+    } finally {
+      setIsApplying(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-150">
@@ -63,50 +92,89 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
         {/* Scrollable Content Body */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
-          {/* Creator row */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="font-bold text-slate-900 text-sm">
-                {post.isCreatorAnonymous ? (post.creatorAnonAlias || '政大隱形同學') : post.creatorName}
+                {post.isCreatorAnonymous
+                  ? post.creatorAnonAlias || (lang === 'zh' ? '政大隱形同學' : 'Anonymous Student')
+                  : post.creatorName}
               </span>
               <span className="text-slate-400 font-mono">★{post.creatorTrustScore}</span>
               <span className="text-slate-400">·</span>
               <span className="text-slate-500">{post.createdAt}</span>
             </div>
 
-            <span className="font-mono text-xs text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg font-bold">
+            <span className="font-mono text-xs text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg font-bold shrink-0 tabular-nums">
               {post.rewardAmount === 0 ? t.free : `NT$ ${post.rewardAmount}`}
             </span>
           </div>
 
-          {/* Title */}
           <h2 className="text-base sm:text-lg font-bold text-slate-900 leading-snug">
-            {lang === 'zh' ? post.title : (post.titleEn || post.title)}
+            {lang === 'zh' ? post.title : post.titleEn || post.title}
           </h2>
 
-          {/* Description */}
+          {hasQuota && (
+            <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl flex items-center justify-between text-xs text-amber-950">
+              <div className="flex items-center gap-2 font-bold">
+                <Users className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>
+                  {isSoldOut
+                    ? lang === 'zh'
+                      ? '名額已領完'
+                      : 'All spots claimed'
+                    : post.category === 'leftovers'
+                      ? lang === 'zh'
+                        ? `🍱 剩餘 ${post.remainingQuota} 份可領取`
+                        : `🍱 ${post.remainingQuota} portions left`
+                      : lang === 'zh'
+                        ? `🛒 剩餘 ${post.remainingQuota} 個跟團名額`
+                        : `🛒 ${post.remainingQuota} spots left`}
+                </span>
+              </div>
+              <span className="text-[11px] font-mono text-amber-800">
+                {lang === 'zh' ? '即時扣除名額' : 'Live Quota'}
+              </span>
+            </div>
+          )}
+
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-700 leading-relaxed whitespace-pre-line">
-            {lang === 'zh' ? post.description : (post.descriptionEn || post.description)}
+            {lang === 'zh' ? post.description : post.descriptionEn || post.description}
           </div>
 
-          {/* LBS Location & Distance Strip */}
           <div className="p-3 bg-emerald-50/60 border border-emerald-200 rounded-xl flex items-center justify-between text-xs text-emerald-950">
             <div className="flex items-center gap-1.5">
               <MapPin className="w-4 h-4 text-emerald-700 shrink-0" />
               <div>
-                <span className="font-bold block">{post.locationName}</span>
+                <span className="font-bold block">
+                  {lang === 'zh' ? post.locationName : post.locationNameEn || post.locationName}
+                </span>
                 <span className="text-[11px] text-emerald-800">
                   {lang === 'zh' ? '目前距您約' : 'Approx. distance:'} <strong>{formattedDist}</strong>
                 </span>
               </div>
             </div>
-            <div className="flex items-center gap-1 text-[11px] font-mono text-slate-600 bg-white/80 px-2.5 py-1 rounded-lg border border-emerald-200">
+            <div className="flex items-center gap-1 text-[11px] font-mono text-slate-700 bg-white/90 px-2.5 py-1 rounded-lg border border-emerald-200 tabular-nums">
               <Clock className="w-3.5 h-3.5 text-slate-400" />
-              <span>{post.timeRemainingText || post.expiresAt}</span>
+              <span>{displayTime}</span>
             </div>
           </div>
 
-          {/* Secondary Reminder Tag (Non-blocking as requested) */}
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+            <div className="flex items-center gap-1.5 font-bold text-slate-800">
+              <CreditCard className="w-3.5 h-3.5 text-slate-500" />
+              <span>
+                {lang === 'zh' ? '付款方式：' : 'Payment: '}
+                {paymentLabel}
+              </span>
+            </div>
+            {post.paymentNote && (
+              <p className="text-[11px] text-slate-600 pl-5">
+                {lang === 'zh' ? '收款備註：' : 'Payment note: '}
+                {post.paymentNote}
+              </p>
+            )}
+          </div>
+
           {post.femaleOnlyRecommended && (
             <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-rose-900 text-xs">
               <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
@@ -118,7 +186,6 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             </div>
           )}
 
-          {/* Tags */}
           <div className="flex flex-wrap gap-1.5 pt-1">
             {post.tags.map((tg, i) => (
               <span key={i} className="text-[11px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
@@ -126,58 +193,56 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               </span>
             ))}
           </div>
-
-          {/* Applicant notification if my post */}
-          {post.status === 'pending_accept' && isMyPost && post.applicantName && (
-            <div className="p-3.5 bg-sky-50 border border-sky-200 rounded-xl flex items-center justify-between gap-2 text-xs text-sky-950">
-              <div>
-                <span className="font-bold block">接單申請人：{post.applicantName} (★{post.applicantTrustScore})</span>
-                <span className="text-[11px] text-sky-700">接受後將正式成立訂單並開啟雙語聊天室</span>
-              </div>
-              <button
-                onClick={() => {
-                  onApproveFulfiller(post.id);
-                  onClose();
-                }}
-                className="px-3.5 py-1.5 bg-sky-700 hover:bg-sky-800 text-white rounded-lg font-bold transition-colors cursor-pointer shrink-0"
-              >
-                確認接受
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Footer Actions */}
-        <div className="p-4 border-t border-slate-200 flex items-center justify-between shrink-0 bg-slate-50">
-          <div className="text-slate-500 font-mono text-xs">
-            {post.paymentMethod.toUpperCase()} · 100% 退款保障
+        <div className="p-4 border-t border-slate-200 flex items-center justify-between gap-3 shrink-0 bg-slate-50">
+          <div className="text-slate-500 text-[11px] truncate">
+            {post.rewardAmount === 0
+              ? lang === 'zh'
+                ? '免費校園互助'
+                : 'Free Mutual Aid'
+              : lang === 'zh'
+                ? `${paymentLabel} · 雙向手動確認`
+                : `${paymentLabel} · P2P Confirm`}
           </div>
 
-          <div className="flex items-center gap-2">
-            {post.status === 'open' && (
+          <div className="flex items-center gap-2 shrink-0">
+            {existingOrder ? (
               <button
+                type="button"
                 onClick={() => {
-                  onApplyAcceptPost(post.id);
                   onClose();
+                  onOpenOrderChat(existingOrder);
                 }}
-                className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer text-xs"
-              >
-                {post.rewardAmount === 0 ? '前往領取 / 互助接單' : '申請接單 (進入確認)'}
-              </button>
-            )}
-
-            {(post.status === 'in_progress' || post.status === 'pending_completion') && (
-              <button
-                onClick={() => {
-                  onOpenChat(post);
-                  onClose();
-                }}
-                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer text-xs flex items-center gap-1.5"
+                className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer text-xs flex items-center gap-1.5"
               >
                 <MessageSquare className="w-3.5 h-3.5" />
-                <span>進入 1-on-1 聊天室</span>
+                <span>{lang === 'zh' ? '進入專屬 1-on-1 聊天室' : 'Open Order Chat'}</span>
               </button>
-            )}
+            ) : post.status === 'open' && !isSoldOut && !isMyPost ? (
+              <button
+                type="button"
+                disabled={isApplying}
+                onClick={handleClaim}
+                className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer text-xs flex items-center gap-1.5"
+              >
+                {isApplying && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>
+                  {hasQuota
+                    ? lang === 'zh'
+                      ? `我要領取 / 參團 (剩餘 ${post.remainingQuota} 份)`
+                      : `Claim Spot (${post.remainingQuota} left)`
+                    : lang === 'zh'
+                      ? '申請接單 / 開啟對話'
+                      : 'Claim Task & Open Chat'}
+                </span>
+              </button>
+            ) : isMyPost ? (
+              <span className="px-3 py-2 bg-slate-200 text-slate-700 font-semibold rounded-xl text-[11px]">
+                {lang === 'zh' ? '您的發布（可至個人頁管理）' : 'Your Post (Manage in Profile)'}
+              </span>
+            ) : null}
           </div>
         </div>
       </div>
