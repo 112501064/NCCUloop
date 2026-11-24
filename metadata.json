@@ -1,0 +1,6 @@
+{
+  "name": "政大指南針 NCCU Compass | 政大學生互助交易平台與系統架構",
+  "description": "專為國立政治大學設計的校園互助、急救與安全二手交易平台。提供完整系統架構、PostgreSQL Schema、AI 女宿安全審核與推流演算法、以及互動式校園體驗與 API 沙盒。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

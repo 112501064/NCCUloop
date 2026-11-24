@@ -1,0 +1,186 @@
+import React from 'react';
+import { PostItem, UserProfile, Language } from '../types';
+import { calculateHaversineDistanceMeters, formatDistance } from '../utils/lbs';
+import { I18N } from '../data/i18n';
+import { 
+  X, MapPin, Clock, CreditCard, ShieldAlert, 
+  MessageSquare, CheckCircle2, UserCheck, AlertTriangle
+} from 'lucide-react';
+
+interface TaskDetailModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  post: PostItem;
+  currentUser: UserProfile;
+  onApplyAcceptPost: (postId: string) => { success: boolean; message: string; reasonCode?: string };
+  onApproveFulfiller: (postId: string) => void;
+  onOpenChat: (post: PostItem) => void;
+  onConfirmCompletion: (postId: string) => void;
+  onRefundPost: (postId: string) => void;
+  lang: Language;
+}
+
+export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
+  isOpen,
+  onClose,
+  post,
+  currentUser,
+  onApplyAcceptPost,
+  onApproveFulfiller,
+  onOpenChat,
+  onConfirmCompletion,
+  onRefundPost,
+  lang,
+}) => {
+  if (!isOpen) return null;
+  const t = I18N[lang];
+
+  const distanceMeters = calculateHaversineDistanceMeters(
+    currentUser.currentCoordinates,
+    post.locationCoordinates
+  );
+  const formattedDist = formatDistance(distanceMeters);
+  const isMyPost = post.creatorId === currentUser.id;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-150">
+      <div className="bg-white rounded-2xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden text-xs flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="p-4 sm:p-5 border-b border-slate-200 flex items-center justify-between shrink-0 bg-slate-900 text-white">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 px-2 py-0.5 rounded font-bold uppercase">
+              {post.category.toUpperCase()}
+            </span>
+            <span className="text-slate-400 text-xs">#{post.id.slice(0, 8)}</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-lg text-slate-400 hover:text-white cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Scrollable Content Body */}
+        <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
+          {/* Creator row */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-slate-900 text-sm">
+                {post.isCreatorAnonymous ? (post.creatorAnonAlias || '政大隱形同學') : post.creatorName}
+              </span>
+              <span className="text-slate-400 font-mono">★{post.creatorTrustScore}</span>
+              <span className="text-slate-400">·</span>
+              <span className="text-slate-500">{post.createdAt}</span>
+            </div>
+
+            <span className="font-mono text-xs text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg font-bold">
+              {post.rewardAmount === 0 ? t.free : `NT$ ${post.rewardAmount}`}
+            </span>
+          </div>
+
+          {/* Title */}
+          <h2 className="text-base sm:text-lg font-bold text-slate-900 leading-snug">
+            {lang === 'zh' ? post.title : (post.titleEn || post.title)}
+          </h2>
+
+          {/* Description */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-700 leading-relaxed whitespace-pre-line">
+            {lang === 'zh' ? post.description : (post.descriptionEn || post.description)}
+          </div>
+
+          {/* LBS Location & Distance Strip */}
+          <div className="p-3 bg-emerald-50/60 border border-emerald-200 rounded-xl flex items-center justify-between text-xs text-emerald-950">
+            <div className="flex items-center gap-1.5">
+              <MapPin className="w-4 h-4 text-emerald-700 shrink-0" />
+              <div>
+                <span className="font-bold block">{post.locationName}</span>
+                <span className="text-[11px] text-emerald-800">
+                  {lang === 'zh' ? '目前距您約' : 'Approx. distance:'} <strong>{formattedDist}</strong>
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 text-[11px] font-mono text-slate-600 bg-white/80 px-2.5 py-1 rounded-lg border border-emerald-200">
+              <Clock className="w-3.5 h-3.5 text-slate-400" />
+              <span>{post.timeRemainingText || post.expiresAt}</span>
+            </div>
+          </div>
+
+          {/* Secondary Reminder Tag (Non-blocking as requested) */}
+          {post.femaleOnlyRecommended && (
+            <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-rose-900 text-xs">
+              <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>
+                {lang === 'zh'
+                  ? '提醒標籤：發布者勾選「建議女性接單」（涉及女宿管制區或個人用品，此為推薦標籤，不作系統強制阻擋）。'
+                  : 'Reminder Tag: Female student recommended by creator (non-blocking).'}
+              </span>
+            </div>
+          )}
+
+          {/* Tags */}
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {post.tags.map((tg, i) => (
+              <span key={i} className="text-[11px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                {tg}
+              </span>
+            ))}
+          </div>
+
+          {/* Applicant notification if my post */}
+          {post.status === 'pending_accept' && isMyPost && post.applicantName && (
+            <div className="p-3.5 bg-sky-50 border border-sky-200 rounded-xl flex items-center justify-between gap-2 text-xs text-sky-950">
+              <div>
+                <span className="font-bold block">接單申請人：{post.applicantName} (★{post.applicantTrustScore})</span>
+                <span className="text-[11px] text-sky-700">接受後將正式成立訂單並開啟雙語聊天室</span>
+              </div>
+              <button
+                onClick={() => {
+                  onApproveFulfiller(post.id);
+                  onClose();
+                }}
+                className="px-3.5 py-1.5 bg-sky-700 hover:bg-sky-800 text-white rounded-lg font-bold transition-colors cursor-pointer shrink-0"
+              >
+                確認接受
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Footer Actions */}
+        <div className="p-4 border-t border-slate-200 flex items-center justify-between shrink-0 bg-slate-50">
+          <div className="text-slate-500 font-mono text-xs">
+            {post.paymentMethod.toUpperCase()} · 100% 退款保障
+          </div>
+
+          <div className="flex items-center gap-2">
+            {post.status === 'open' && (
+              <button
+                onClick={() => {
+                  onApplyAcceptPost(post.id);
+                  onClose();
+                }}
+                className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer text-xs"
+              >
+                {post.rewardAmount === 0 ? '前往領取 / 互助接單' : '申請接單 (進入確認)'}
+              </button>
+            )}
+
+            {(post.status === 'in_progress' || post.status === 'pending_completion') && (
+              <button
+                onClick={() => {
+                  onOpenChat(post);
+                  onClose();
+                }}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer text-xs flex items-center gap-1.5"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>進入 1-on-1 聊天室</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
