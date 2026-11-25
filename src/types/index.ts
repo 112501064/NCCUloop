@@ -12,17 +12,17 @@ export interface CampusLocation {
   isFemaleDorm?: boolean;
 }
 
-export type PostCategory = 
-  | 'leftovers'   // 即時剩食 🍱 (預設 2 小時有效)
-  | 'emergency'   // 緊急求救 🆘 (15m, 30m, 1h)
-  | 'traffic'     // 交通 🚗 (共乘/高鐵車票/客運/計程車湊票)
-  | 'marketplace' // 二手市集 📦 (課本、體育用品、日常)
+export type PostCategory =
+  | 'leftovers'   // 即時剩食 🍱
+  | 'emergency'   // 緊急求救 🆘
+  | 'traffic'     // 交通 🚗
+  | 'marketplace' // 二手市集 📦
   | 'rental'      // 租房轉租 🏠
   | 'tutor'       // 家教伴讀 🎓
   | 'skill'       // 技能教學 💡
   | 'group_buy';  // 揪團預購 🛒
 
-export type EmergencySubcategory = 
+export type EmergencySubcategory =
   | 'sanitary_pad'    // 衛生棉救援
   | 'needlework'      // 針線包借用
   | 'emergency_print' // 緊急列印救援
@@ -30,20 +30,20 @@ export type EmergencySubcategory =
   | 'sports_gear'     // 體育用品
   | 'mask_medical';   // 口罩救援
 
-export type PostStatus = 
+export type PostStatus =
   | 'draft'
   | 'open'
   | 'pending_accept'     // 階段一：接單申請中（待發布者確認）
-  | 'in_progress'        // 階段二：進行中 & 1-on-1 雙語聊天室開啟
+  | 'in_progress'        // 階段二：進行中 & 1-on-1 聊天室開啟
   | 'pending_completion' // 階段三：一方確認結案
-  | 'completed'          // 雙方確認結案 / 已領完
+  | 'completed'          // 雙方確認結案
   | 'disputed'           // 申訴凍結中
   | 'cancelled'
-  | 'closed'             // 名額歸零下架
+  | 'closed'             // 名額歸零（已額滿）
   | 'expired'            // 已過期（可一鍵重新上架）
   | 'refunded';
 
-export type PaymentMethod = 
+export type PaymentMethod =
   | 'cash_meetup'  // 面交現金
   | 'pre_transfer' // 事前轉帳（街口支付 / 台灣 Pay / Line Pay）
   | 'jko_pay'      // 街口支付 (JKOPAY)
@@ -53,7 +53,9 @@ export type PaymentMethod =
   | 'campus_points'// 平台點數
   | 'free_aid';    // 免費 / 純互助
 
-export type TimeOption = '15m' | '30m' | '1h' | '2h' | 'custom_time' | 'flexible';
+export type PaymentDirection = 'creator_pays' | 'accepter_pays' | 'free';
+
+export type TimeOption = '15m' | '30m' | '1h' | '2h' | 'tonight' | 'tomorrow' | 'custom_time' | 'flexible';
 
 export interface UserProfile {
   id: string;
@@ -61,6 +63,7 @@ export interface UserProfile {
   nccuEmail: string;
   name: string;
   nickname: string;
+  realName: string;
   nameEn: string;
   gender?: 'female' | 'male' | 'undisclosed' | 'other';
   avatar: string;
@@ -74,13 +77,14 @@ export interface UserProfile {
   currentCoordinates: { lat: number; lng: number };
   isVerifiedStudent: boolean;
   trustScore: number;
+  helpCount: number;
   completedTasks: number;
   disputeCount: number;
   hasScooter: boolean;
   canTutorSubjects: string[];
   subscribedTags: string[];
   walletBalance: number;
-  boundPaymentGateways: string[]; // e.g. ['line_pay', 'jko_pay']
+  boundPaymentGateways: string[];
 }
 
 export interface PostItem {
@@ -91,7 +95,7 @@ export interface PostItem {
   creatorTrustScore: number;
   isCreatorAnonymous?: boolean;
   creatorAnonAlias?: string;
-  
+
   category: PostCategory;
   subcategory?: EmergencySubcategory;
   title: string;
@@ -99,50 +103,49 @@ export interface PostItem {
   description: string;
   descriptionEn?: string;
   tags: string[];
-  
+
   rewardAmount: number; // NTD (0 for free)
   isNegotiable?: boolean;
   paymentMethod: PaymentMethod;
-  paymentNote?: string; // 選填：收款帳號或收款連結備註
-  payerRole?: 'creator' | 'fulfiller'; // 誰付款：求救任務為發布者付款；二手/共乘為接單者付款
-  payerMarkedPaid?: boolean; // 付款方已點擊「我已付款」
-  payeeConfirmedReceived?: boolean; // 收款方已點擊「確認已收到款項」
+  paymentDirection?: PaymentDirection;
+  paymentNote?: string;
+  payerRole?: 'creator' | 'fulfiller';
+  payerMarkedPaid?: boolean;
+  payeeConfirmedReceived?: boolean;
   escrowDeposit: number;
-  
-  // Multi-quota system for leftovers & group_buy
+
+  // Multi-quota system (parent task quantity vs remainingQuantity)
   totalQuota?: number;
   remainingQuota?: number;
   claimedByUserIds?: string[];
-  
+
   timeOption: TimeOption;
-  remainingMinutes?: number; // 用於 +30m 延時與動態倒數顯示
+  remainingMinutes?: number;
   timeRemainingText?: string;
-  
+
   status: PostStatus;
   locationName: string;
   locationNameEn?: string;
   locationCoordinates: { lat: number; lng: number };
   locationZone: CampusZone;
-  
-  // Secondary non-blocking tag as requested
-  femaleOnlyRecommended?: boolean; // 次要提醒標籤 (發布者勾選之提醒，非系統強制阻擋)
+
+  femaleOnlyRecommended?: boolean;
   minTrustScoreRequired: number;
-  
-  // 1-on-1 Fulfillment & 2-way handshake
+
   applicantId?: string;
   applicantName?: string;
   applicantAvatar?: string;
   applicantTrustScore?: number;
-  
+
   fulfillerId?: string;
   fulfillerName?: string;
   isFulfillerAnonymous?: boolean;
   fulfillerAnonAlias?: string;
-  
+
   creatorConfirmedCompleted?: boolean;
   fulfillerConfirmedCompleted?: boolean;
   identityRevealStatus?: 'none' | 'requested_by_creator' | 'requested_by_fulfiller' | 'mutual_revealed';
-  
+
   createdAt: string;
   expiresAt: string;
   createdAtMs?: number;
@@ -164,24 +167,27 @@ export interface ChatMessage {
   type: 'text' | 'image' | 'system' | 'identity_reveal_request';
 }
 
-export type DisputeCategory = 
-  | 'no_show'          // 放鴿子 / 未完成
-  | 'harassment'       // 言語騷擾
+export type DisputeCategory =
+  | 'no_show'          // 放鳥未到
+  | 'money_dispute'    // 金錢糾紛
+  | 'harassment'       // 騷擾不當言論
+  | 'impersonation'    // 假冒身分
   | 'malicious_cancel' // 信用瑕疵 / 惡意棄單
   | 'fraud'            // 詐騙 / 不實商品
   | 'other';           // 其他
 
 export interface ReportItem {
   id: string;
+  orderId?: string;
   taskId: string;
-  taskTitle: string;
+  taskTitle?: string;
   reporterId: string;
-  reporterName: string;
-  reportedUserId: string;
-  reportedUserName: string;
+  reporterName?: string;
+  reportedUserId?: string;
+  reportedUserName?: string;
   reasonCategory: DisputeCategory;
   description: string;
-  status: 'frozen_escrow' | 'resolved' | 'dismissed';
+  status: 'submitted' | 'frozen_escrow' | 'confirmed_violation' | 'dismissed';
   createdAt: string;
 }
 
@@ -214,22 +220,26 @@ export type OrderStatus =
 export interface OrderItem {
   id: string;
   taskId: string;
+  taskCategory?: PostCategory;
   taskTitle: string;
   taskTitleEn?: string;
   taskLocation: string;
   taskLocationEn?: string;
   taskPrice: number;
   paymentMethod: PaymentMethod;
+  paymentDirection?: PaymentDirection;
   paymentNote?: string;
   payerRole?: 'creator' | 'fulfiller';
   taskExpireAt?: number;
   creatorUid: string;
   creatorName: string;
+  creatorRealName?: string;
   creatorEmail?: string;
   creatorAnonymous: boolean;
   creatorAnonAlias?: string;
   accepterUid: string;
   accepterName: string;
+  accepterRealName?: string;
   accepterAnonymous: boolean;
   accepterAnonAlias?: string;
   status: OrderStatus;
@@ -239,6 +249,7 @@ export interface OrderItem {
   accepterDoneConfirmed: boolean;
   revealCreator: boolean;
   revealAccepter: boolean;
+  completedAtMs?: number;
   disputeReason?: string;
   disputedByUid?: string;
   createdAtMs?: number;
@@ -254,3 +265,19 @@ export interface OrderMessage {
   timestampText?: string;
 }
 
+export interface ReviewItem {
+  id: string;
+  orderId: string;
+  taskId: string;
+  taskTitle?: string;
+  taskCategory: PostCategory;
+  paymentDirection?: PaymentDirection;
+  reviewerUid: string;
+  reviewerName: string;
+  revieweeUid: string;
+  rating: number;
+  tags: string[];
+  comment: string;
+  scoreDelta: number;
+  createdAtMs?: number;
+}

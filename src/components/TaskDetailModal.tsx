@@ -12,6 +12,7 @@ import {
   CreditCard,
   Users,
   Loader2,
+  Flag,
 } from 'lucide-react';
 
 interface TaskDetailModalProps {
@@ -22,6 +23,7 @@ interface TaskDetailModalProps {
   existingOrder?: OrderItem | null;
   onApplyAcceptPost: (postId: string) => Promise<{ success: boolean; message: string; order?: OrderItem }>;
   onOpenOrderChat: (order: OrderItem) => void;
+  onReportPost: (post: PostItem) => void;
   lang: Language;
 }
 
@@ -33,6 +35,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   existingOrder,
   onApplyAcceptPost,
   onOpenOrderChat,
+  onReportPost,
   lang,
 }) => {
   const [isApplying, setIsApplying] = useState<boolean>(false);
@@ -55,6 +58,18 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
       : post.timeRemainingText || post.expiresAt;
 
   const paymentLabel = formatPaymentMethodLabel(post.paymentMethod, lang);
+  const directionLabel =
+    post.rewardAmount === 0 || post.paymentDirection === 'free'
+      ? lang === 'zh'
+        ? '0 元免費互助'
+        : 'Free Mutual Aid'
+      : post.paymentDirection === 'creator_pays' || post.payerRole === 'creator'
+        ? lang === 'zh'
+          ? '應付款方：發布者'
+          : 'Payer: Creator'
+        : lang === 'zh'
+          ? '應付款方：接單者'
+          : 'Payer: Accepter';
 
   const handleClaim = async () => {
     setIsApplying(true);
@@ -80,14 +95,33 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             <span className="font-mono text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 px-2 py-0.5 rounded font-bold uppercase">
               {post.category.toUpperCase()}
             </span>
-            <span className="text-slate-400 text-xs">#{post.id.slice(0, 8)}</span>
+            {post.isCreatorAnonymous === true && (
+              <span className="text-[10px] bg-slate-800 text-slate-200 border border-slate-700 px-2 py-0.5 rounded font-semibold">
+                {lang === 'zh' ? '🛡️ 匿名防護中' : '🛡️ Anonymous'}
+              </span>
+            )}
           </div>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-white cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            {!isMyPost && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onReportPost(post);
+                }}
+                className="px-2.5 py-1 bg-rose-900/60 hover:bg-rose-900 text-rose-200 border border-rose-500/40 rounded-lg text-[11px] font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                <Flag className="w-3 h-3 text-rose-300" />
+                <span>{lang === 'zh' ? '舉報' : 'Report'}</span>
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-1 rounded-lg text-slate-400 hover:text-white cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Scrollable Content Body */}
@@ -95,10 +129,17 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-bold text-slate-900 text-sm">
-                {post.isCreatorAnonymous
-                  ? post.creatorAnonAlias || (lang === 'zh' ? '政大隱形同學' : 'Anonymous Student')
+                {post.isCreatorAnonymous === true
+                  ? lang === 'zh'
+                    ? '匿名同學'
+                    : 'Anonymous Student'
                   : post.creatorName}
               </span>
+              {post.isCreatorAnonymous === true && (
+                <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-semibold border border-slate-200">
+                  {lang === 'zh' ? '🛡️ 匿名防護中' : '🛡️ Anonymous'}
+                </span>
+              )}
               <span className="text-slate-400 font-mono">★{post.creatorTrustScore}</span>
               <span className="text-slate-400">·</span>
               <span className="text-slate-500">{post.createdAt}</span>
@@ -120,7 +161,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                 <span>
                   {isSoldOut
                     ? lang === 'zh'
-                      ? '名額已領完'
+                      ? '名額已額滿'
                       : 'All spots claimed'
                     : post.category === 'leftovers'
                       ? lang === 'zh'
@@ -132,7 +173,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                 </span>
               </div>
               <span className="text-[11px] font-mono text-amber-800">
-                {lang === 'zh' ? '即時扣除名額' : 'Live Quota'}
+                {lang === 'zh' ? `總名額 ${post.totalQuota} 份` : `${post.totalQuota} total`}
               </span>
             </div>
           )}
@@ -160,11 +201,16 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           </div>
 
           <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
-            <div className="flex items-center gap-1.5 font-bold text-slate-800">
-              <CreditCard className="w-3.5 h-3.5 text-slate-500" />
-              <span>
-                {lang === 'zh' ? '付款方式：' : 'Payment: '}
-                {paymentLabel}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                <CreditCard className="w-3.5 h-3.5 text-slate-500" />
+                <span>
+                  {lang === 'zh' ? '付款方式：' : 'Payment: '}
+                  {paymentLabel}
+                </span>
+              </div>
+              <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+                {directionLabel}
               </span>
             </div>
             {post.paymentNote && (
@@ -202,9 +248,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               ? lang === 'zh'
                 ? '免費校園互助'
                 : 'Free Mutual Aid'
-              : lang === 'zh'
-                ? `${paymentLabel} · 雙向手動確認`
-                : `${paymentLabel} · P2P Confirm`}
+              : `${paymentLabel} · ${directionLabel}`}
           </div>
 
           <div className="flex items-center gap-2 shrink-0">

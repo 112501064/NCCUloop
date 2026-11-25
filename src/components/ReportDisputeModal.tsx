@@ -1,14 +1,20 @@
 import React, { useState } from 'react';
-import { OrderItem, UserProfile, DisputeCategory, Language } from '../types';
+import { OrderItem, PostItem, UserProfile, DisputeCategory, Language } from '../types';
 import { I18N } from '../data/i18n';
 import { X, AlertTriangle, ShieldAlert, Lock } from 'lucide-react';
 
 interface ReportDisputeModalProps {
   isOpen: boolean;
   onClose: () => void;
-  order: OrderItem;
+  order?: OrderItem | null;
+  post?: PostItem | null;
   currentUser: UserProfile;
-  onSubmitDispute: (order: OrderItem, category: DisputeCategory, description: string) => Promise<void> | void;
+  onSubmitReport: (params: {
+    order?: OrderItem | null;
+    post?: PostItem | null;
+    category: DisputeCategory;
+    description: string;
+  }) => Promise<void> | void;
   lang: Language;
 }
 
@@ -16,32 +22,49 @@ export const ReportDisputeModal: React.FC<ReportDisputeModalProps> = ({
   isOpen,
   onClose,
   order,
+  post,
   currentUser,
-  onSubmitDispute,
+  onSubmitReport,
   lang,
 }) => {
   const [category, setCategory] = useState<DisputeCategory>('no_show');
   const [description, setDescription] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  if (!isOpen) return null;
+  if (!isOpen || (!order && !post)) return null;
 
   const t = I18N[lang];
-  const isCreator = currentUser.id === order.creatorUid;
-  const bothRevealed = order.revealCreator && order.revealAccepter;
-  const targetUserName = isCreator
-    ? bothRevealed || !order.accepterAnonymous
-      ? order.accepterName
-      : order.accepterAnonAlias || '匿名接單同學'
-    : bothRevealed || !order.creatorAnonymous
-      ? order.creatorName
-      : order.creatorAnonAlias || '匿名發布者';
+
+  let targetUserLabel = '';
+  let contextTitle = '';
+  if (order) {
+    const isCreator = currentUser.id === order.creatorUid;
+    const bothRevealed = order.revealCreator && order.revealAccepter;
+    const peerNick = isCreator ? order.accepterName : order.creatorName;
+    const peerReal = isCreator ? order.accepterRealName : order.creatorRealName;
+    targetUserLabel = bothRevealed
+      ? peerReal
+        ? `${peerNick}（${peerReal}）`
+        : peerNick
+      : lang === 'zh'
+        ? '匿名同學'
+        : 'Anonymous Peer';
+    contextTitle = order.taskTitle;
+  } else if (post) {
+    targetUserLabel =
+      post.isCreatorAnonymous === true
+        ? lang === 'zh'
+          ? '匿名同學'
+          : 'Anonymous Student'
+        : post.creatorName;
+    contextTitle = post.title;
+  }
 
   const categories: { id: DisputeCategory; label: string }[] = [
-    { id: 'harassment', label: t.disputeHarassment },
     { id: 'no_show', label: t.disputeNoShow },
-    { id: 'malicious_cancel', label: t.disputeMaliciousCancel },
-    { id: 'fraud', label: t.disputeFraud },
+    { id: 'money_dispute', label: t.disputeMoney },
+    { id: 'harassment', label: t.disputeHarassment },
+    { id: 'impersonation', label: t.disputeImpersonation },
     { id: 'other', label: t.disputeOther },
   ];
 
@@ -49,7 +72,12 @@ export const ReportDisputeModal: React.FC<ReportDisputeModalProps> = ({
     e.preventDefault();
     setIsSubmitting(true);
     try {
-      await onSubmitDispute(order, category, description.trim() || '檢舉申訴提交');
+      await onSubmitReport({
+        order,
+        post,
+        category,
+        description: description.trim() || '校園安全舉報提交',
+      });
       setDescription('');
       onClose();
     } finally {
@@ -62,18 +90,19 @@ export const ReportDisputeModal: React.FC<ReportDisputeModalProps> = ({
       <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl overflow-hidden text-xs">
         {/* Header */}
         <div className="bg-rose-950 text-white p-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 text-rose-400" />
-            <div>
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+            <div className="min-w-0">
               <h3 className="text-sm font-bold">{t.disputeTitle}</h3>
-              <p className="text-[11px] text-rose-200">
-                對象：{targetUserName} · 訂單 #{order.id.slice(0, 10)}
+              <p className="text-[11px] text-rose-200 truncate">
+                {lang === 'zh' ? '對象：' : 'Target: '}
+                {targetUserLabel} · {contextTitle}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded text-rose-300 hover:text-white cursor-pointer"
+            className="p-1 rounded text-rose-300 hover:text-white cursor-pointer shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
@@ -84,8 +113,8 @@ export const ReportDisputeModal: React.FC<ReportDisputeModalProps> = ({
           <Lock className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
           <p className="text-[11px] leading-relaxed">
             {lang === 'zh'
-              ? '提交申訴後，訂單狀態將即時標記為「爭議凍結」，並留存雙方對話紀錄供校園管理端查核。'
-              : 'Filing a dispute immediately flags this order as disputed and preserves chat logs for review.'}
+              ? '提交舉報後將立即受理並留存紀錄；若查證違規成立，違規方信任指數將扣除 10 分。'
+              : 'Your report is immediately recorded. Confirmed violations deduct 10 trust points from the offending account.'}
           </p>
         </div>
 
@@ -97,7 +126,7 @@ export const ReportDisputeModal: React.FC<ReportDisputeModalProps> = ({
               {categories.map((cat) => (
                 <label
                   key={cat.id}
-                  className={`flex items-center gap-2.5 p-2 rounded-lg border cursor-pointer transition-colors ${
+                  className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-colors ${
                     category === cat.id
                       ? 'bg-rose-50 border-rose-300 text-rose-950 font-semibold'
                       : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
@@ -118,7 +147,7 @@ export const ReportDisputeModal: React.FC<ReportDisputeModalProps> = ({
 
           <div>
             <label className="block text-slate-700 font-bold mb-1">
-              {lang === 'zh' ? '詳細情況描述 (選填)' : 'Detailed Incident Description'}
+              {lang === 'zh' ? '補充說明 (選填)' : 'Additional Details (Optional)'}
             </label>
             <textarea
               rows={3}
@@ -127,7 +156,7 @@ export const ReportDisputeModal: React.FC<ReportDisputeModalProps> = ({
               placeholder={
                 lang === 'zh'
                   ? '請簡述事發經過、約定時間與具體問題...'
-                  : 'Describe timeline, agreed time, and specific issue...'
+                  : 'Describe timeline, agreed meeting point, and details...'
               }
               className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-rose-700"
             />
@@ -151,7 +180,7 @@ export const ReportDisputeModal: React.FC<ReportDisputeModalProps> = ({
               ) : (
                 <>
                   <ShieldAlert className="w-3.5 h-3.5" />
-                  <span>{lang === 'zh' ? '送出舉報並標記爭議' : 'Submit Report'}</span>
+                  <span>{t.submitDispute}</span>
                 </>
               )}
             </button>

@@ -10,7 +10,14 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
-import { OrderItem, OrderMessage, UserProfile, Language } from '../types';
+import {
+  OrderItem,
+  OrderMessage,
+  UserProfile,
+  ReviewItem,
+  PaymentDirection,
+  Language,
+} from '../types';
 import { I18N } from '../data/i18n';
 import { formatPaymentMethodLabel, formatRemainingMinutes } from '../utils/formatters';
 import {
@@ -26,6 +33,7 @@ import {
   Coins,
   Lock,
   UserPlus,
+  Star,
 } from 'lucide-react';
 
 interface ChatRoomModalProps {
@@ -34,13 +42,23 @@ interface ChatRoomModalProps {
   order: OrderItem;
   currentUser: UserProfile;
   useFirestoreRealtime: boolean;
+  existingReview?: ReviewItem | null;
   localMessages?: OrderMessage[];
   onLocalSendMessage?: (orderId: string, text: string) => void;
   onLocalUpdateOrder?: (orderId: string, patch: Partial<OrderItem>) => void;
+  onSubmitReview: (params: {
+    order: OrderItem;
+    rating: number;
+    tags: string[];
+    comment: string;
+  }) => Promise<void> | void;
   onOpenDispute: (order: OrderItem) => void;
   onShowToast: (msg: string) => void;
   lang: Language;
 }
+
+const REVIEW_QUICK_TAGS_ZH = ['準時面交', '回覆迅速', '親切友善', '守信用', '說明清楚'];
+const REVIEW_QUICK_TAGS_EN = ['Punctual', 'Fast Reply', 'Friendly', 'Reliable', 'Clear Info'];
 
 export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
   isOpen,
@@ -48,9 +66,11 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
   order,
   currentUser,
   useFirestoreRealtime,
+  existingReview,
   localMessages = [],
   onLocalSendMessage,
   onLocalUpdateOrder,
+  onSubmitReview,
   onOpenDispute,
   onShowToast,
   lang,
@@ -58,9 +78,15 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
   const [inputText, setInputText] = useState<string>('');
   const [firestoreMessages, setFirestoreMessages] = useState<OrderMessage[]>([]);
   const [isSending, setIsSending] = useState<boolean>(false);
+
+  // Post-completion review form state
+  const [rating, setRating] = useState<number>(5);
+  const [selectedTags, setSelectedTags] = useState<string[]>(['準時面交', '親切友善']);
+  const [reviewComment, setReviewComment] = useState<string>('');
+  const [isSubmittingReview, setIsSubmittingReview] = useState<boolean>(false);
+
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Real-time Firestore listener on orders/{orderId}/messages (ordered by createdAt asc)
   useEffect(() => {
     if (!isOpen || !useFirestoreRealtime || !auth.currentUser) {
       return;
@@ -79,7 +105,7 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
             id: docSnap.id,
             text: String(d.text || ''),
             senderUid: String(d.senderUid || ''),
-            senderName: String(d.senderName || '政大同學'),
+            senderName: String(d.senderName || '匿名同學'),
             createdAtMs: createdTs ? createdTs.getTime() : Date.now(),
             timestampText: createdTs
               ? createdTs.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })
@@ -98,7 +124,6 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
 
   const messages = useFirestoreRealtime ? firestoreMessages : localMessages;
 
-  // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     if (isOpen) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -109,32 +134,47 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
 
   const t = I18N[lang];
   const isCreator = currentUser.id === order.creatorUid;
-  const bothRevealed = order.revealCreator && order.revealAccepter;
-  const iRevealed = isCreator ? order.revealCreator : order.revealAccepter;
 
-  const otherPartyName = isCreator
-    ? bothRevealed || !order.accepterAnonymous
-      ? order.accepterName
-      : order.accepterAnonAlias || (lang === 'zh' ? '匿名接單同學' : 'Anonymous Peer')
-    : bothRevealed || !order.creatorAnonymous
-      ? order.creatorName
-      : order.creatorAnonAlias || (lang === 'zh' ? '匿名發布者' : 'Anonymous Creator');
+  // STRICT MUTUAL REVEAL: ONLY true when BOTH creator and accepter have consented
+  const bothRevealed = order.revealCreator === true && order.revealAccepter === true;
+  const iRevealed = isCreator ? order.revealCreator === true : order.revealAccepter === true;
 
-  const isPaidTask = order.taskPrice > 0;
+  const peerNickname = isCreator ? order.accepterName : order.creatorName;
+  const peerRealName = isCreator ? order.accepterRealName : order.creatorRealName;
+
+  const otherPartyDisplayName = bothRevealed
+    ? peerRealName
+      ? `${peerNickname}（${peerRealName}）`
+      : peerNickname
+    : lang === 'zh'
+      ? '匿名同學'
+      : 'Anonymous Peer';
+
+  const otherPartyAvatarChar = bothRevealed ? peerNickname.slice(0, 1) : '匿';
+
+  // CLEAR PAYMENT DIRECTION: creator_pays | accepter_pays | free
+  const effectiveDirection: PaymentDirection =
+    order.taskPrice === 0 || order.paymentDirection === 'free'
+      ? 'free'
+      : order.paymentDirection === 'creator_pays' || order.payerRole === 'creator'
+        ? 'creator_pays'
+        : 'accepter_pays';
+
+  const isFreeOrder = effectiveDirection === 'free';
   const isPayer =
-    (order.payerRole === 'creator' && isCreator) ||
-    (order.payerRole !== 'creator' && !isCreator);
+    (effectiveDirection === 'creator_pays' && isCreator) ||
+    (effectiveDirection === 'accepter_pays' && !isCreator);
 
   const payerConfirmed =
-    order.payerRole === 'creator'
+    effectiveDirection === 'creator_pays'
       ? order.creatorPaidConfirmed
       : order.accepterPaidConfirmed;
   const payeeConfirmed =
-    order.payerRole === 'creator'
+    effectiveDirection === 'creator_pays'
       ? order.accepterPaidConfirmed
       : order.creatorPaidConfirmed;
 
-  const isPaymentSettled = !isPaidTask || (payerConfirmed && payeeConfirmed);
+  const isPaymentSettled = isFreeOrder || (payerConfirmed && payeeConfirmed);
   const myPaidConfirmed = isCreator
     ? order.creatorPaidConfirmed
     : order.accepterPaidConfirmed;
@@ -153,19 +193,28 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
         : 'Active';
 
   const paymentLabel = formatPaymentMethodLabel(order.paymentMethod, lang);
+  const directionBadgeText =
+    effectiveDirection === 'free'
+      ? lang === 'zh'
+        ? '0 元免費互助'
+        : 'Free Mutual Aid'
+      : effectiveDirection === 'creator_pays'
+        ? lang === 'zh'
+          ? '應付款方：發布者'
+          : 'Payer: Creator'
+        : lang === 'zh'
+          ? '應付款方：接單者'
+          : 'Payer: Accepter';
 
   const quickPhrases = [
     lang === 'zh' ? '我到宿舍門口了！' : 'I arrived at the dorm entrance!',
-    lang === 'zh' ? '已列印完成，正在走過去。' : 'Printed completed, walking over.',
+    lang === 'zh' ? '已抵達約定地點。' : 'Arrived at the meeting spot.',
     lang === 'zh' ? '已轉帳給您，請查收！' : 'Transferred! Please check.',
     lang === 'zh' ? '正在路上，約 5 分鐘後抵達。' : 'On my way, arriving in ~5 mins.',
   ];
 
-  // Helper to update order document in Firestore (or local fallback)
-  const updateOrderFields = async (
-    patch: Partial<OrderItem>,
-    alsoUpdateTaskStatus?: 'in_progress' | 'completed'
-  ) => {
+  // Helper to update ONLY this Order document (never mutates parent task remainingQuantity/status)
+  const updateOrderFields = async (patch: Partial<OrderItem>) => {
     if (!useFirestoreRealtime || !auth.currentUser) {
       onLocalUpdateOrder?.(order.id, patch);
       return;
@@ -177,16 +226,6 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
         ...patch,
         updatedAt: serverTimestamp(),
       });
-      if (alsoUpdateTaskStatus && order.taskId) {
-        try {
-          await updateDoc(doc(db, 'tasks', order.taskId), {
-            status: alsoUpdateTaskStatus,
-            updatedAt: serverTimestamp(),
-          });
-        } catch {
-          // multi-quota or creator-only guard: ignore if task is already closed/shared
-        }
-      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, orderPath);
     }
@@ -226,11 +265,11 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
   };
 
   const handleConfirmAcceptOrder = async () => {
-    await updateOrderFields({ status: 'in_progress' }, 'in_progress');
+    await updateOrderFields({ status: 'in_progress' });
     await sendTextMessage(
       lang === 'zh'
-        ? '［系統狀態］發布者已點擊「確認接受訂單」，任務正式進入進行中！'
-        : '[Status] Creator confirmed the order. Task is now In Progress!'
+        ? '［系統通知］發布者已確認接受訂單，請於聊天室約定面交細節！'
+        : '[Notice] Creator accepted the order. Please coordinate details here!'
     );
     onShowToast(lang === 'zh' ? '✅ 已確認接受訂單！' : '✅ Order accepted!');
   };
@@ -243,10 +282,10 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
     await sendTextMessage(
       isPayer
         ? lang === 'zh'
-          ? '［金流確認］我已付款完成，請對方查收。'
+          ? '［付款通知］我已付款完成，請對方確認收款。'
           : '[Payment] Marked as paid.'
         : lang === 'zh'
-          ? '［金流確認］確認已收到款項！'
+          ? '［收款確認］確認已收到款項！'
           : '[Payment] Confirmed payment received!'
     );
     onShowToast(
@@ -255,24 +294,34 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
           ? '已標記「我已付款」'
           : 'Marked as paid'
         : lang === 'zh'
-          ? '已標記「確認已收到款項」'
+          ? '已標記「確認已收款」'
           : 'Confirmed receipt'
     );
   };
 
   const handleConsentReveal = async () => {
+    const myNick = currentUser.nickname || currentUser.name;
+    const myReal = currentUser.realName || myNick;
     const patch: Partial<OrderItem> = isCreator
-      ? { revealCreator: true }
-      : { revealAccepter: true };
+      ? {
+          revealCreator: true,
+          creatorName: myNick,
+          creatorRealName: myReal,
+        }
+      : {
+          revealAccepter: true,
+          accepterName: myNick,
+          accepterRealName: myReal,
+        };
     await updateOrderFields(patch);
     await sendTextMessage(
       lang === 'zh'
-        ? `［身分揭曉］${currentUser.nickname || currentUser.name} 已同意解除匿名（雙方皆同意即公開真實姓名）。`
-        : '[Identity] Agreed to reveal identity.'
+        ? '［身分揭曉］我已同意解除匿名（雙方皆同意後將顯示暱稱與本名）。'
+        : '[Identity] Consented to mutual identity reveal.'
     );
     onShowToast(
       lang === 'zh'
-        ? '已同意解除匿名！雙方皆同意後將立即顯示真實名稱。'
+        ? '已同意解除匿名！雙方皆同意後將同步顯示彼此暱稱與本名。'
         : 'Agreed to reveal identity!'
     );
   };
@@ -282,46 +331,82 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
     const peerDone = isCreator ? order.accepterDoneConfirmed : order.creatorDoneConfirmed;
     const nextStatus = peerDone ? 'completed' : order.status;
     const patch: Partial<OrderItem> = isCreator
-      ? { creatorDoneConfirmed: true, status: nextStatus }
-      : { accepterDoneConfirmed: true, status: nextStatus };
+      ? {
+          creatorDoneConfirmed: true,
+          status: nextStatus,
+          ...(peerDone ? { completedAtMs: Date.now() } : {}),
+        }
+      : {
+          accepterDoneConfirmed: true,
+          status: nextStatus,
+          ...(peerDone ? { completedAtMs: Date.now() } : {}),
+        };
 
-    await updateOrderFields(patch, peerDone ? 'completed' : undefined);
+    await updateOrderFields(patch);
     await sendTextMessage(
       peerDone
         ? lang === 'zh'
-          ? '🎉 雙方皆已確認任務完成並結案！'
-          : '🎉 Both parties confirmed completion!'
+          ? '🎉 雙方皆已確認完成並結案！現在可於下方為對方留下星等評價。'
+          : '🎉 Both parties confirmed completion! You can now leave a review below.'
         : lang === 'zh'
-          ? '［結案確認］我已確認任務完成，等待對方點擊結案。'
+          ? '［結案確認］我已確認任務完成，等待對方點擊確認完成。'
           : '[Completion] Marked task done, awaiting peer confirmation.'
     );
     onShowToast(
       peerDone
         ? lang === 'zh'
-          ? '🎉 雙方已確認完成並結案！'
-          : '🎉 Order completed!'
+          ? '🎉 雙方已確認完成並結案！請為本次互助留下評價。'
+          : '🎉 Order completed! Please leave a review.'
         : lang === 'zh'
           ? '已送出完成確認，等待對方確認後結案。'
           : 'Marked done, waiting for peer.'
     );
   };
 
+  const toggleReviewTag = (tag: string) => {
+    if (selectedTags.includes(tag)) {
+      setSelectedTags(selectedTags.filter((tg) => tg !== tag));
+    } else if (selectedTags.length < 6) {
+      setSelectedTags([...selectedTags, tag]);
+    }
+  };
+
+  const handleSubmitReviewForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmittingReview(true);
+    try {
+      await onSubmitReview({
+        order,
+        rating,
+        tags: selectedTags,
+        comment: reviewComment.trim(),
+      });
+      setReviewComment('');
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
+
+  const tagOptions = lang === 'zh' ? REVIEW_QUICK_TAGS_ZH : REVIEW_QUICK_TAGS_EN;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-150">
       <div className="bg-white rounded-2xl w-full max-w-lg h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden text-xs">
-        {/* Chat Header */}
+        {/* Chat Top Banner (Strictly respects revealCreator && revealAccepter) */}
         <div className="bg-slate-900 text-white p-3.5 sm:p-4 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <div className="relative shrink-0">
               <div className="w-9 h-9 rounded-full bg-emerald-600/30 border border-emerald-400/50 flex items-center justify-center text-sm font-bold text-white">
-                {otherPartyName.slice(0, 1)}
+                {otherPartyAvatarChar}
               </div>
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 absolute bottom-0 right-0 border-2 border-slate-900"></span>
             </div>
 
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="font-bold text-sm text-white truncate">{otherPartyName}</span>
+                <span className="font-bold text-sm text-white truncate">
+                  {otherPartyDisplayName}
+                </span>
                 <span
                   className={`px-1.5 py-0.5 rounded text-[10px] font-mono shrink-0 ${
                     bothRevealed
@@ -331,11 +416,11 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
                 >
                   {bothRevealed
                     ? lang === 'zh'
-                      ? '已公開身分'
+                      ? '已同意公開本名'
                       : 'ID Revealed'
                     : lang === 'zh'
-                      ? '匿名防護中'
-                      : 'Anonymous'}
+                      ? '🛡️ 匿名防護中'
+                      : '🛡️ Anonymous'}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 truncate max-w-xs">
@@ -349,7 +434,7 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
               onClick={() => onOpenDispute(order)}
               disabled={order.status === 'disputed' || order.status === 'completed'}
               className="px-2.5 py-1 bg-rose-900/60 hover:bg-rose-900 disabled:opacity-40 text-rose-200 border border-rose-500/40 rounded-lg text-[11px] font-semibold transition-colors flex items-center gap-1 cursor-pointer"
-              title={lang === 'zh' ? '舉報申訴' : 'Report / Dispute'}
+              title={lang === 'zh' ? '舉報' : 'Report'}
             >
               <AlertTriangle className="w-3 h-3 text-rose-400" />
               <span>{t.reportDispute}</span>
@@ -364,7 +449,7 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
           </div>
         </div>
 
-        {/* PINNED DEAL SUMMARY CARD (Fixed at top, never scrolls away) */}
+        {/* PINNED DEAL SUMMARY CARD */}
         <div className="bg-white border-b border-slate-200 px-3.5 py-2.5 shrink-0">
           <div className="bg-slate-50 border border-slate-200/90 rounded-xl p-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px]">
             <div className="flex items-center gap-1.5 min-w-0">
@@ -379,14 +464,15 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
               <Coins className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
               <span className="text-slate-400 shrink-0">{lang === 'zh' ? '金額' : 'Amt'}:</span>
               <span className="font-mono font-bold text-emerald-800 tabular-nums truncate">
-                {order.taskPrice === 0 ? t.free : `NT$ ${order.taskPrice}`}
+                {isFreeOrder ? t.free : `NT$ ${order.taskPrice}`}
               </span>
             </div>
 
             <div className="flex items-center gap-1.5 min-w-0">
               <CreditCard className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-              <span className="text-slate-400 shrink-0">{lang === 'zh' ? '付款' : 'Pay'}:</span>
-              <span className="font-semibold text-slate-700 truncate">{paymentLabel}</span>
+              <span className="font-semibold text-slate-700 truncate">
+                {isFreeOrder ? directionBadgeText : `${paymentLabel} · ${directionBadgeText}`}
+              </span>
             </div>
 
             <div className="flex items-center gap-1.5 min-w-0">
@@ -397,7 +483,7 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
               </span>
             </div>
 
-            {order.paymentNote && (
+            {order.paymentNote && !isFreeOrder && (
               <div className="col-span-2 pt-1 border-t border-slate-200/70 text-[10px] text-slate-600 truncate">
                 <span className="font-semibold text-slate-500">
                   {lang === 'zh' ? '收款備註：' : 'Account Note: '}
@@ -408,7 +494,7 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
           </div>
         </div>
 
-        {/* Real-time Firestore State Controls (Accept Order, Payment Confirm, Anonymity Reveal, Completion) */}
+        {/* Order State Controls */}
         <div className="bg-slate-50 border-b border-slate-200 px-3.5 py-2.5 shrink-0 space-y-2">
           {/* Pending Creator Confirmation Banner */}
           {order.status === 'pending_confirm' && (
@@ -438,15 +524,18 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
           {/* Disputed Notice */}
           {order.status === 'disputed' && (
             <div className="bg-rose-50 border border-rose-200 rounded-xl px-3 py-2 text-[11px] text-rose-800 font-semibold">
-              ⚠️ {lang === 'zh' ? '此訂單已被標記為爭議申訴凍結中' : 'Order flagged for dispute'}
+              ⚠️ {lang === 'zh' ? '此訂單已被標記為爭議申訴中' : 'Order flagged for dispute'}
               {order.disputeReason ? `：${order.disputeReason}` : ''}
             </div>
           )}
 
-          {/* Manual P2P Payment Confirmation Bar (Paid Tasks) */}
-          {isPaidTask && order.status !== 'disputed' && (
+          {/* Role-Specific Payment Confirmation Bar (Hidden completely for free 0-NTD orders) */}
+          {!isFreeOrder && order.status !== 'disputed' && (
             <div className="flex flex-wrap items-center justify-between gap-2 bg-white border border-slate-200 rounded-xl px-2.5 py-2">
               <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+                <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-bold">
+                  {directionBadgeText}
+                </span>
                 <span
                   className={`px-2 py-0.5 rounded-md font-semibold ${
                     payerConfirmed
@@ -459,7 +548,7 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
                       ? '✓ 付款方已付款'
                       : '✓ Payer Paid'
                     : lang === 'zh'
-                      ? '待付款方確認'
+                      ? '待付款方付款'
                       : 'Awaiting Payment'}
                 </span>
                 <span className="text-slate-300">→</span>
@@ -480,34 +569,46 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
                 </span>
               </div>
 
-              <button
-                type="button"
-                disabled={myPaidConfirmed || order.status === 'completed'}
-                onClick={handleTogglePaymentConfirm}
-                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer shrink-0 ${
-                  myPaidConfirmed
-                    ? 'bg-emerald-100 text-emerald-800 cursor-default'
-                    : isPayer
-                      ? 'bg-slate-900 hover:bg-slate-800 text-white shadow-2xs'
-                      : 'bg-emerald-700 hover:bg-emerald-800 text-white shadow-2xs'
-                }`}
-              >
-                {myPaidConfirmed
-                  ? isPayer
+              {/* Strictly render [我已付款] ONLY for Payer, and [確認已收款] ONLY for Payee */}
+              {isPayer ? (
+                <button
+                  type="button"
+                  disabled={myPaidConfirmed || order.status === 'completed'}
+                  onClick={handleTogglePaymentConfirm}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer shrink-0 ${
+                    myPaidConfirmed
+                      ? 'bg-emerald-100 text-emerald-800 cursor-default'
+                      : 'bg-slate-900 hover:bg-slate-800 text-white shadow-2xs'
+                  }`}
+                >
+                  {myPaidConfirmed
                     ? lang === 'zh'
                       ? '已標記付款 ✓'
                       : 'Marked Paid ✓'
                     : lang === 'zh'
+                      ? '我已付款'
+                      : 'I Have Paid'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={myPaidConfirmed || order.status === 'completed'}
+                  onClick={handleTogglePaymentConfirm}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer shrink-0 ${
+                    myPaidConfirmed
+                      ? 'bg-emerald-100 text-emerald-800 cursor-default'
+                      : 'bg-emerald-700 hover:bg-emerald-800 text-white shadow-2xs'
+                  }`}
+                >
+                  {myPaidConfirmed
+                    ? lang === 'zh'
                       ? '已確認收款 ✓'
                       : 'Confirmed Receipt ✓'
-                  : isPayer
-                    ? lang === 'zh'
-                      ? '我已付款'
-                      : 'I Have Paid'
                     : lang === 'zh'
-                      ? '確認已收到款項'
+                      ? '確認已收款'
                       : 'Confirm Received'}
-              </button>
+                </button>
+              )}
             </div>
           )}
 
@@ -520,16 +621,14 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
                   <span>{t.revealedStatus}</span>
                 </span>
               ) : iRevealed ? (
-                <span className="text-amber-700 font-medium">
-                  {lang === 'zh' ? '已同意解除匿名，等待對方同意' : 'Agreed to reveal, awaiting peer'}
-                </span>
+                <span className="text-amber-700 font-medium">{t.revealRequested}</span>
               ) : (
                 <button
                   type="button"
                   onClick={handleConsentReveal}
                   className="text-slate-700 hover:text-slate-900 underline decoration-slate-300 cursor-pointer font-semibold"
                 >
-                  + {lang === 'zh' ? '同意解除匿名' : 'Consent to Reveal ID'}
+                  + {t.requestReveal}
                 </button>
               )}
             </div>
@@ -546,7 +645,7 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
               title={
                 !isPaymentSettled
                   ? lang === 'zh'
-                    ? '須雙方完成「我已付款」與「確認已收到款項」後方可結案'
+                    ? '須付款方與收款方完成確認後方可結案'
                     : 'Both payment confirmations required'
                   : undefined
               }
@@ -572,7 +671,7 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
                     : 'Completed'
                   : !isPaymentSettled
                     ? lang === 'zh'
-                      ? '雙向確認金流後解鎖結案'
+                      ? '完成收付款確認後可結案'
                       : 'Confirm Payment First'
                     : myDoneConfirmed
                       ? lang === 'zh'
@@ -586,13 +685,13 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
           </div>
         </div>
 
-        {/* Message Thread Body (Real-time Firestore Subcollection) */}
+        {/* Message Thread Body (Strictly respects bothRevealed for peer sender name) */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50">
           <div className="text-center my-1">
             <span className="text-[10px] text-slate-400 bg-slate-100 px-3 py-1 rounded-full font-mono">
               {lang === 'zh'
-                ? '即時 1-on-1 對話已連線 · 雙方狀態按鈕將同步更新'
-                : 'Live 1-on-1 Chat Connected · Real-time Sync Active'}
+                ? '1-on-1 私密聊天室 · 雙方皆同意解除匿名才顯示真實姓名'
+                : 'Private 1-on-1 Chat · Real names hidden until mutual consent'}
             </span>
           </div>
 
@@ -605,8 +704,8 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
           )}
 
           {messages.map((msg) => {
-            const isSystem = msg.senderUid === 'system' || msg.text.startsWith('［') || msg.text.startsWith('[');
-            if (isSystem && msg.senderUid === 'system') {
+            const isSystem = msg.senderUid === 'system';
+            if (isSystem) {
               return (
                 <div key={msg.id} className="text-center my-1.5">
                   <span className="inline-block text-[10px] text-slate-500 bg-slate-200/70 px-3 py-1 rounded-xl max-w-[90%]">
@@ -617,6 +716,11 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
             }
 
             const isMe = msg.senderUid === currentUser.id;
+            const senderDisplayName = isMe
+              ? lang === 'zh'
+                ? '我'
+                : 'Me'
+              : otherPartyDisplayName;
 
             return (
               <div
@@ -624,7 +728,7 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
                 className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} space-y-1`}
               >
                 <div className="flex items-center gap-1.5 text-[10px] text-slate-400 px-1">
-                  <span>{isMe ? (lang === 'zh' ? '我' : 'Me') : msg.senderName}</span>
+                  <span>{senderDisplayName}</span>
                   <span>·</span>
                   <span className="font-mono">{msg.timestampText || '剛剛'}</span>
                 </div>
@@ -644,6 +748,105 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
           <div ref={messagesEndRef} />
         </div>
 
+        {/* Post-Completion Mutual Rating & Review Panel */}
+        {order.status === 'completed' && (
+          <div className="p-3.5 bg-emerald-50/80 border-t border-emerald-200 shrink-0 space-y-2.5">
+            {existingReview ? (
+              <div className="flex items-center justify-between gap-2 text-emerald-900">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                  <span className="font-bold">
+                    {lang === 'zh'
+                      ? `感謝評價！已給予對方 ${existingReview.rating} 顆星評價`
+                      : `Thank you! Rated ${existingReview.rating} stars`}
+                  </span>
+                </div>
+                <div className="flex items-center gap-0.5 text-amber-500">
+                  {Array.from({ length: existingReview.rating }).map((_, idx) => (
+                    <Star key={idx} className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleSubmitReviewForm} className="space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold text-emerald-950 text-xs">
+                    {lang === 'zh'
+                      ? `✨ 為 ${otherPartyDisplayName} 評分（結案互評）`
+                      : `✨ Rate ${otherPartyDisplayName}`}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    {[1, 2, 3, 4, 5].map((starVal) => (
+                      <button
+                        key={starVal}
+                        type="button"
+                        onClick={() => setRating(starVal)}
+                        className="p-0.5 cursor-pointer"
+                      >
+                        <Star
+                          className={`w-4 h-4 transition-colors ${
+                            starVal <= rating
+                              ? 'fill-amber-400 text-amber-500'
+                              : 'text-slate-300'
+                          }`}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Quick Review Tags */}
+                <div className="flex flex-wrap gap-1.5">
+                  {tagOptions.map((tg) => {
+                    const active = selectedTags.includes(tg);
+                    return (
+                      <button
+                        key={tg}
+                        type="button"
+                        onClick={() => toggleReviewTag(tg)}
+                        className={`px-2.5 py-1 rounded-full text-[11px] border cursor-pointer transition-colors ${
+                          active
+                            ? 'bg-emerald-700 text-white border-emerald-700 font-bold'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {tg}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={reviewComment}
+                    onChange={(e) => setReviewComment(e.target.value)}
+                    placeholder={
+                      lang === 'zh'
+                        ? '寫一句感謝或互助心得（選填）...'
+                        : 'Optional review comment...'
+                    }
+                    className="flex-1 bg-white border border-emerald-200 rounded-xl px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isSubmittingReview}
+                    className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white rounded-xl font-bold text-xs cursor-pointer shrink-0"
+                  >
+                    {isSubmittingReview
+                      ? lang === 'zh'
+                        ? '送出中...'
+                        : 'Saving...'
+                      : lang === 'zh'
+                        ? '送出評價'
+                        : 'Submit'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        )}
+
         {/* Quick Phrases Strip */}
         <div className="px-3 py-2 bg-white border-t border-slate-100 flex items-center gap-1.5 overflow-x-auto shrink-0">
           <span className="text-[10px] text-slate-400 shrink-0 font-medium">{t.quickPhrases}:</span>
@@ -660,12 +863,17 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
         </div>
 
         {/* Message Input Bar */}
-        <form onSubmit={handleSendForm} className="p-3 bg-white border-t border-slate-200 flex items-center gap-2 shrink-0">
+        <form
+          onSubmit={handleSendForm}
+          className="p-3 bg-white border-t border-slate-200 flex items-center gap-2 shrink-0"
+        >
           <button
             type="button"
             onClick={() =>
               void sendTextMessage(
-                lang === 'zh' ? '［已傳送物資 / 轉帳截圖通知］' : '[Photo / transfer receipt sent]'
+                lang === 'zh'
+                  ? '［已傳送物資 / 轉帳截圖通知］'
+                  : '[Photo / transfer receipt sent]'
               )
             }
             className="p-2 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
@@ -678,11 +886,7 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder={
-              lang === 'zh'
-                ? '輸入訊息... 即時寫入 Firestore 聊天室'
-                : 'Type message... Real-time sync'
-            }
+            placeholder={lang === 'zh' ? '輸入訊息...' : 'Type a message...'}
             className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700"
           />
 

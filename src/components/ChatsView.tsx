@@ -19,7 +19,6 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 }) => {
   const t = I18N[lang];
 
-  // Show all orders where currentUser is creatorUid or accepterUid
   const userOrders = orders.filter(
     (o) => o.creatorUid === currentUser.id || o.accepterUid === currentUser.id
   );
@@ -35,7 +34,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           </span>
         </h2>
         <span className="text-xs text-slate-500">
-          {lang === 'zh' ? '即時 1-on-1 Firestore 對話' : 'Real-time 1-on-1 Chat'}
+          {lang === 'zh' ? '即時私訊對話' : 'Real-time 1-on-1 Chat'}
         </span>
       </div>
 
@@ -52,14 +51,20 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         <div className="space-y-3">
           {userOrders.map((order) => {
             const isCreator = order.creatorUid === currentUser.id;
-            const bothRevealed = order.revealCreator && order.revealAccepter;
-            const otherPartyName = isCreator
-              ? bothRevealed || !order.accepterAnonymous
-                ? order.accepterName
-                : order.accepterAnonAlias || (lang === 'zh' ? '匿名接單同學' : 'Anonymous Accepter')
-              : bothRevealed || !order.creatorAnonymous
-                ? order.creatorName
-                : order.creatorAnonAlias || (lang === 'zh' ? '匿名發布者' : 'Anonymous Creator');
+            const bothRevealed =
+              order.revealCreator === true && order.revealAccepter === true;
+            const peerNick = isCreator ? order.accepterName : order.creatorName;
+            const peerReal = isCreator ? order.accepterRealName : order.creatorRealName;
+
+            const otherPartyName = bothRevealed
+              ? peerReal
+                ? `${peerNick}（${peerReal}）`
+                : peerNick
+              : lang === 'zh'
+                ? '匿名同學'
+                : 'Anonymous Peer';
+
+            const avatarInitial = bothRevealed ? peerNick.slice(0, 1) : '匿';
 
             const minsLeft = order.taskExpireAt
               ? Math.max(0, Math.round((order.taskExpireAt - Date.now()) / 60000))
@@ -80,7 +85,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="relative shrink-0">
                     <div className="w-11 h-11 rounded-xl bg-emerald-700/10 border border-emerald-600/30 text-emerald-800 flex items-center justify-center font-bold text-sm">
-                      {otherPartyName.slice(0, 1)}
+                      {avatarInitial}
                     </div>
                     <span
                       className={`w-2.5 h-2.5 rounded-full absolute -bottom-0.5 -right-0.5 border-2 border-white ${

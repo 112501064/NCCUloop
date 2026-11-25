@@ -39,8 +39,9 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
   const [verifiedEmail, setVerifiedEmail] = useState<string>('');
   const [verifiedAvatar, setVerifiedAvatar] = useState<string>('');
 
-  // Step 2: Basic Profile
+  // Step 2: Basic Profile (Nickname + Real Name)
   const [nickname, setNickname] = useState<string>('');
+  const [realName, setRealName] = useState<string>('');
   const [selectedZone, setSelectedZone] = useState<CampusZone>('downhill');
   const [selectedGender, setSelectedGender] = useState<'undisclosed' | 'female' | 'male'>('undisclosed');
 
@@ -61,7 +62,7 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
         setAuthError(
           lang === 'zh'
             ? '僅限政大學生信箱 (@g.nccu.edu.tw)'
-            : '僅限政大學生信箱 (@g.nccu.edu.tw) — Only @g.nccu.edu.tw accounts allowed'
+            : 'Only @g.nccu.edu.tw student accounts are allowed.'
         );
         return;
       }
@@ -69,8 +70,12 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
       setVerifiedUid(user.uid);
       setVerifiedEmail(email);
       setVerifiedAvatar(user.photoURL || '');
+      const display = user.displayName?.trim() || '';
       if (!nickname.trim()) {
-        setNickname(user.displayName?.trim() || email.split('@')[0]);
+        setNickname(display || email.split('@')[0]);
+      }
+      if (!realName.trim() && display) {
+        setRealName(display);
       }
       setStep(2);
     } catch (err: unknown) {
@@ -97,7 +102,7 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
   };
 
   const handleVerifyStep2 = () => {
-    if (!nickname.trim()) return;
+    if (!nickname.trim() || !realName.trim()) return;
     setStep(3);
   };
 
@@ -108,11 +113,15 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
       nccuEmail: verifiedEmail,
       studentId: emailPrefix,
       nickname: nickname.trim(),
+      realName: realName.trim(),
       name: nickname.trim(),
       nameEn: nickname.trim(),
       avatar: verifiedAvatar || undefined,
       gender: selectedGender,
       zone: selectedZone,
+      trustScore: 90,
+      helpCount: 0,
+      completedTasks: 0,
       isVerifiedStudent: true,
       boundPaymentGateways: withPayment ? selectedGateways : [],
     });
@@ -199,8 +208,8 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                 </h2>
                 <p className="text-[11px] text-slate-500 leading-relaxed">
                   {lang === 'zh'
-                    ? '採用 Google OAuth 實名驗證，僅限政大學生信箱 (@g.nccu.edu.tw) 登入使用。'
-                    : 'Verified via Google Sign-In. Restricted exclusively to @g.nccu.edu.tw student accounts.'}
+                    ? '僅限政大學生信箱 (@g.nccu.edu.tw) 登入使用，確保校園安全互助環境。'
+                    : 'Restricted exclusively to @g.nccu.edu.tw student accounts for a safe campus community.'}
                 </p>
               </div>
 
@@ -208,8 +217,8 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                 <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
                 <span>
                   {lang === 'zh'
-                    ? '系統將自動檢核網域，非 @g.nccu.edu.tw 帳號會立即登出攔截。'
-                    : 'Non-@g.nccu.edu.tw accounts are automatically rejected and signed out.'}
+                    ? '系統將自動確認政大學生身分，非政大信箱無法進入平台。'
+                    : 'Only verified @g.nccu.edu.tw student accounts are permitted.'}
                 </span>
               </div>
 
@@ -263,7 +272,7 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
             </div>
           )}
 
-          {/* STEP 2: Basic Profile Setup */}
+          {/* STEP 2: Basic Profile Setup (Nickname + Real Name) */}
           {step === 2 && (
             <div className="space-y-4 pt-1 animate-in fade-in duration-150">
               <div className="space-y-1">
@@ -279,25 +288,42 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                 </div>
               </div>
 
-              {/* Required: Nickname (Pre-filled from Google Display Name) */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  {lang === 'zh' ? '校園暱稱 (必填)' : 'Nickname (Required)'}
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={nickname}
-                  onChange={(e) => setNickname(e.target.value)}
-                  placeholder={lang === 'zh' ? '例如：政大巧芸、山道小騎士' : 'e.g. Audrey Chen'}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900 focus:bg-white transition-all"
-                />
-                <p className="text-[10px] text-slate-400 mt-1">
-                  {lang === 'zh'
-                    ? '已自動帶入您的 Google 顯示名稱作為預設建議，可自由修改。'
-                    : 'Pre-filled from your Google profile name; feel free to customize.'}
-                </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Required: Nickname */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    {lang === 'zh' ? '校園暱稱 (必填)' : 'Nickname (Required)'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={nickname}
+                    onChange={(e) => setNickname(e.target.value)}
+                    placeholder={lang === 'zh' ? '例：政大巧芸、山道騎手' : 'e.g. Audrey'}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900 focus:bg-white transition-all"
+                  />
+                </div>
+
+                {/* Required: Real Name */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    {lang === 'zh' ? '真實姓名 (必填)' : 'Real Name (Required)'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={realName}
+                    onChange={(e) => setRealName(e.target.value)}
+                    placeholder={lang === 'zh' ? '例：陳巧芸' : 'e.g. Audrey Chen'}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900 focus:bg-white transition-all"
+                  />
+                </div>
               </div>
+              <p className="text-[10px] text-slate-400 -mt-2">
+                {lang === 'zh'
+                  ? '平時大廳與個人主頁僅顯示「暱稱」；唯有雙方同意解除匿名時，聊天室才會顯示「暱稱（本名）」。'
+                  : 'Only your nickname is shown publicly. Your real name appears only when both parties consent in chat.'}
+              </p>
 
               {/* Optional: Language Capsule Buttons */}
               <div className="space-y-1.5 pt-1">
@@ -406,7 +432,7 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                 </button>
                 <button
                   type="button"
-                  disabled={!nickname.trim()}
+                  disabled={!nickname.trim() || !realName.trim()}
                   onClick={handleVerifyStep2}
                   className="flex-1 py-3 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
                 >
@@ -430,7 +456,7 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                 <p className="text-[11px] text-slate-500 leading-relaxed">
                   {lang === 'zh'
                     ? '本平台採「線下現金 / 事前轉帳雙向確認制」，不會自動扣款。勾選常用工具供發單快速預填：'
-                    : 'Uses offline/manual P2P payment confirmation (no auto-charge). Select preferred methods:'}
+                    : 'Uses offline/manual payment confirmation (no auto-charge). Select preferred methods:'}
                 </p>
               </div>
 
@@ -502,7 +528,7 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
       <footer className="w-full max-w-4xl flex items-center justify-between py-2 text-[11px] text-slate-400">
         <span>© 2026 {APP_CONFIG.appNameEn} · National Chengchi University</span>
         <div className="flex items-center gap-3">
-          <span>{lang === 'zh' ? '政大 Google OAuth 實名驗證' : 'Verified NCCU Google Auth'}</span>
+          <span>{lang === 'zh' ? '政大學生實名驗證' : 'Verified NCCU Student'}</span>
           {isDemoEnabled && onQuickDemoLogin && (
             <button
               type="button"

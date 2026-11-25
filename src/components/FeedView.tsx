@@ -1,9 +1,15 @@
 import React, { useState } from 'react';
-import { PostItem, UserProfile, Language } from '../types';
+import { PostItem, UserProfile, Language, CampusZone } from '../types';
 import { CleanTaskCard } from './CleanTaskCard';
-import { calculateHaversineDistanceMeters } from '../utils/lbs';
+import {
+  calculateHaversineDistanceMeters,
+  findNearestLandmark,
+  formatDistance,
+  MANUAL_CAMPUS_AREAS,
+  Coordinates,
+} from '../utils/lbs';
 import { I18N } from '../data/i18n';
-import { MapPin, Zap, Sparkles } from 'lucide-react';
+import { MapPin, Zap, Sparkles, Navigation, Loader2 } from 'lucide-react';
 
 interface FeedViewProps {
   posts: PostItem[];
@@ -11,6 +17,7 @@ interface FeedViewProps {
   onSelectPost: (post: PostItem) => void;
   onOpenCreatePost: () => void;
   onOpenOnboarding: () => void;
+  onUpdateLocation: (coords: Coordinates, areaLabel: string, zone: CampusZone) => void;
   mode?: 'feed' | 'flash';
   lang: Language;
 }
@@ -19,6 +26,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
   posts,
   currentUser,
   onSelectPost,
+  onUpdateLocation,
   mode = 'feed',
   lang,
 }) => {
@@ -27,6 +35,48 @@ export const FeedView: React.FC<FeedViewProps> = ({
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [flashSubFilter, setFlashSubFilter] = useState<'all' | 'leftovers' | 'emergency'>('all');
   const [sortBy, setSortBy] = useState<'latest' | 'closest'>('closest');
+  const [isLocating, setIsLocating] = useState<boolean>(false);
+  const [geoStatus, setGeoStatus] = useState<'idle' | 'gps' | 'denied'>('idle');
+  const [manualAreaId, setManualAreaId] = useState<'downhill' | 'uphill' | 'zhinan'>('downhill');
+
+  const nearest = findNearestLandmark(currentUser.currentCoordinates);
+
+  const handleRequestGeolocation = () => {
+    if (!navigator.geolocation) {
+      setGeoStatus('denied');
+      return;
+    }
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const coords = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        };
+        const closestLandmark = findNearestLandmark(coords);
+        onUpdateLocation(
+          coords,
+          closestLandmark.landmark.name,
+          closestLandmark.landmark.zone
+        );
+        setGeoStatus('gps');
+        setIsLocating(false);
+      },
+      () => {
+        setGeoStatus('denied');
+        setIsLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  };
+
+  const handleSelectManualArea = (areaId: 'downhill' | 'uphill' | 'zhinan') => {
+    const area = MANUAL_CAMPUS_AREAS.find((a) => a.id === areaId);
+    if (!area) return;
+    setManualAreaId(areaId);
+    setGeoStatus('idle');
+    onUpdateLocation(area.coordinates, area.labelZh, area.zone);
+  };
 
   const matchesFollowedTag = (post: PostItem) => {
     if (!currentUser.subscribedTags || currentUser.subscribedTags.length === 0) return false;
@@ -47,7 +97,6 @@ export const FeedView: React.FC<FeedViewProps> = ({
     });
   };
 
-  // Filter active lobby posts (exclude expired, completed, closed, refunded, cancelled, and zero-quota tasks)
   const filtered = posts.filter((p) => {
     const isDelisted =
       p.status === 'expired' ||
@@ -82,7 +131,6 @@ export const FeedView: React.FC<FeedViewProps> = ({
     return true;
   });
 
-  // Calculate distances and sort
   const postsWithDistance = filtered.map((p) => ({
     ...p,
     distanceMeters: calculateHaversineDistanceMeters(
@@ -117,6 +165,89 @@ export const FeedView: React.FC<FeedViewProps> = ({
 
   return (
     <div className="space-y-4 pb-24">
+      {/* Campus Geolocation & Landmark Distance Bar */}
+      <div className="bg-white border border-slate-200/90 rounded-2xl p-3.5 shadow-2xs space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center shrink-0">
+              <MapPin className="w-4 h-4 text-emerald-700" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
+                <span>{lang === 'zh' ? '📍 校園定位' : '📍 Campus Location'}</span>
+                <span className="font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md text-[11px] tabular-nums">
+                  {lang === 'zh'
+                    ? `距${nearest.landmark.name} ${formatDistance(nearest.distanceMeters)}`
+                    : `${formatDistance(nearest.distanceMeters)} from ${nearest.landmark.nameEn}`}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                {geoStatus === 'gps'
+                  ? lang === 'zh'
+                    ? '已啟用即時定位，自動計算各政大地標距離'
+                    : 'Live location active across NCCU landmarks'
+                  : geoStatus === 'denied'
+                    ? lang === 'zh'
+                      ? '未授權瀏覽器定位，請直接點選下方校區位置'
+                      : 'Location permission declined; select campus area below'
+                    : lang === 'zh'
+                      ? '可點擊右側取得即時定位，或手動選擇所在校區'
+                      : 'Tap locate for live GPS or pick a campus area'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleRequestGeolocation}
+            disabled={isLocating}
+            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white rounded-xl text-[11px] font-bold flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
+          >
+            {isLocating ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Navigation className="w-3.5 h-3.5 text-emerald-400" />
+            )}
+            <span>
+              {isLocating
+                ? lang === 'zh'
+                  ? '定位中...'
+                  : 'Locating...'
+                : lang === 'zh'
+                  ? '更新目前位置'
+                  : 'Use My Location'}
+            </span>
+          </button>
+        </div>
+
+        {/* Manual Zone Selector Fallback (山下校區 / 山上校區 / 指南路) */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[11px] text-slate-400 mr-0.5">
+              {lang === 'zh' ? '手動切換區域：' : 'Campus Area:'}
+            </span>
+            {MANUAL_CAMPUS_AREAS.map((area) => (
+              <button
+                key={area.id}
+                type="button"
+                onClick={() => handleSelectManualArea(area.id)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border cursor-pointer transition-colors ${
+                  geoStatus !== 'gps' && manualAreaId === area.id
+                    ? 'bg-emerald-700 text-white border-emerald-700 font-bold'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                {lang === 'zh' ? area.labelZh : area.labelEn}
+              </button>
+            ))}
+          </div>
+
+          <span className="font-mono text-emerald-800 font-semibold text-[11px] tabular-nums">
+            {postsWithDistance.length} {lang === 'zh' ? '則進行中任務' : 'live tasks'}
+          </span>
+        </div>
+      </div>
+
       {/* Flash Mode Header Banner */}
       {mode === 'flash' && (
         <div className="bg-amber-50/80 border border-amber-200/90 rounded-2xl px-4 py-3 flex items-center justify-between gap-3">
@@ -130,8 +261,8 @@ export const FeedView: React.FC<FeedViewProps> = ({
               </h2>
               <p className="text-[11px] text-amber-800 truncate">
                 {lang === 'zh'
-                  ? '優先匯集 2 小時限時剩食與即時校園緊急救援'
-                  : '2-hour leftover shares & immediate campus help requests'}
+                  ? '優先匯集限時剩食與即時校園緊急救援'
+                  : 'Time-limited leftover shares & immediate campus help requests'}
               </p>
             </div>
           </div>
@@ -141,7 +272,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
         </div>
       )}
 
-      {/* Dynamic Top Pill Filters */}
+      {/* Dynamic Top Pill Filters & Sort Switcher */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs scrollbar-none flex-1">
           {pillFilters.map((pill) => (
@@ -165,11 +296,10 @@ export const FeedView: React.FC<FeedViewProps> = ({
           ))}
         </div>
 
-        {/* Sort Switcher: Closest vs Latest */}
         <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-full p-1 text-[11px] shrink-0">
           <button
             onClick={() => setSortBy('closest')}
-            className={`px-2 py-0.5 rounded-full transition-colors cursor-pointer ${
+            className={`px-2.5 py-0.5 rounded-full transition-colors cursor-pointer ${
               sortBy === 'closest' ? 'bg-emerald-700 text-white font-bold' : 'text-slate-500'
             }`}
           >
@@ -177,7 +307,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
           </button>
           <button
             onClick={() => setSortBy('latest')}
-            className={`px-2 py-0.5 rounded-full transition-colors cursor-pointer ${
+            className={`px-2.5 py-0.5 rounded-full transition-colors cursor-pointer ${
               sortBy === 'latest' ? 'bg-slate-900 text-white font-bold' : 'text-slate-500'
             }`}
           >
@@ -186,7 +316,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
         </div>
       </div>
 
-      {/* Synced Followed Tags Strip when Recommended filter is active */}
+      {/* Synced Followed Tags Strip */}
       {mode === 'feed' && activeFilter === 'recommended' && (
         <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl px-3.5 py-2.5 flex flex-wrap items-center gap-1.5 text-[11px]">
           <span className="flex items-center gap-1 font-bold text-emerald-900 mr-1">
@@ -211,20 +341,6 @@ export const FeedView: React.FC<FeedViewProps> = ({
           )}
         </div>
       )}
-
-      {/* LBS User Anchor Strip */}
-      <div className="flex items-center justify-between px-1 text-[11px] text-slate-500">
-        <div className="flex items-center gap-1">
-          <MapPin className="w-3.5 h-3.5 text-emerald-600" />
-          <span>
-            {lang === 'zh' ? '目前定位錨點：' : 'Current LBS Anchor:'}{' '}
-            <strong>{currentUser.dormLocation || '綜院南棟 (山下)'}</strong>
-          </span>
-        </div>
-        <span className="font-mono text-emerald-800 font-semibold tabular-nums">
-          {postsWithDistance.length} {lang === 'zh' ? '則即時任務' : 'live tasks'}
-        </span>
-      </div>
 
       {/* Clean Cards Stream */}
       {postsWithDistance.length === 0 ? (

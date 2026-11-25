@@ -1,8 +1,26 @@
 import React, { useState } from 'react';
-import { PostCategory, CampusZone, PostItem, UserProfile, PaymentMethod, TimeOption, Language } from '../types';
+import {
+  PostCategory,
+  CampusZone,
+  PostItem,
+  UserProfile,
+  PaymentMethod,
+  PaymentDirection,
+  TimeOption,
+  Language,
+} from '../types';
 import { I18N } from '../data/i18n';
-import { 
-  X, ShieldAlert, MapPin, Clock, DollarSign, UserX, Wand2, Users, Minus, Plus, Wallet
+import {
+  X,
+  ShieldAlert,
+  MapPin,
+  Clock,
+  UserX,
+  Wand2,
+  Users,
+  Minus,
+  Plus,
+  Wallet,
 } from 'lucide-react';
 import { formatRemainingMinutes } from '../utils/formatters';
 
@@ -13,6 +31,46 @@ interface PostCreateModalProps {
   onCreatePost: (newPost: Partial<PostItem>) => void;
   lang: Language;
 }
+
+function toDatetimeLocalValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const yyyy = date.getFullYear();
+  const mm = pad(date.getMonth() + 1);
+  const dd = pad(date.getDate());
+  const hh = pad(date.getHours());
+  const min = pad(date.getMinutes());
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+}
+
+function computePresetDeadline(preset: '30m' | '1h' | '2h' | 'tonight' | 'tomorrow'): Date {
+  const now = new Date();
+  if (preset === '30m') return new Date(now.getTime() + 30 * 60000);
+  if (preset === '1h') return new Date(now.getTime() + 60 * 60000);
+  if (preset === '2h') return new Date(now.getTime() + 120 * 60000);
+  if (preset === 'tonight') {
+    const tonight = new Date(now);
+    tonight.setHours(22, 0, 0, 0);
+    if (tonight.getTime() <= now.getTime()) {
+      tonight.setTime(now.getTime() + 120 * 60000);
+    }
+    return tonight;
+  }
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(18, 0, 0, 0);
+  return tomorrow;
+}
+
+const PRESET_LOCATIONS = [
+  { name: '總圖書館', zone: 'downhill' as CampusZone, lat: 24.9866, lng: 121.5766, isFemaleDorm: false },
+  { name: '商學院', zone: 'downhill' as CampusZone, lat: 24.9866, lng: 121.5754, isFemaleDorm: false },
+  { name: '達賢圖書館', zone: 'downhill' as CampusZone, lat: 24.9849, lng: 121.5727, isFemaleDorm: false },
+  { name: '莊敬外舍', zone: 'dorms' as CampusZone, lat: 24.9888, lng: 121.5722, isFemaleDorm: true },
+  { name: '山下校門口', zone: 'downhill' as CampusZone, lat: 24.9877, lng: 121.5759, isFemaleDorm: false },
+  { name: '麥側', zone: 'off_campus' as CampusZone, lat: 24.9881, lng: 121.5772, isFemaleDorm: false },
+  { name: '綜院', zone: 'downhill' as CampusZone, lat: 24.9862, lng: 121.5755, isFemaleDorm: false },
+  { name: '山上綜合大樓', zone: 'uphill' as CampusZone, lat: 24.9825, lng: 121.5795, isFemaleDorm: false },
+];
 
 export const PostCreateModal: React.FC<PostCreateModalProps> = ({
   isOpen,
@@ -25,157 +83,201 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
   const t = I18N[lang];
 
   const [category, setCategory] = useState<PostCategory>('leftovers');
-  
-  // Custom Title & Description (Starts blank for full freedom)
+
   const [title, setTitle] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   const [titleEn, setTitleEn] = useState<string>('');
   const [descriptionEn, setDescriptionEn] = useState<string>('');
-  
-  // Multi-quota for leftovers & group_buy (Default 1, range 1..20)
+
+  // Multi-quota for leftovers & group_buy (1..20)
   const [quotaCount, setQuotaCount] = useState<number>(1);
-  
-  // Smart Pickers: Location
-  const [selectedLocName, setSelectedLocName] = useState<string>('綜院');
+
+  // Location Picker
+  const [selectedLocName, setSelectedLocName] = useState<string>('總圖書館');
   const [isCustomLoc, setIsCustomLoc] = useState<boolean>(false);
   const [customLocationName, setCustomLocationName] = useState<string>('');
-  
-  // Smart Pickers: Price & Manual Payment Confirmation
+
+  // Price & Payment Direction
   const [priceType, setPriceType] = useState<'fixed' | 'free'>('free');
   const [rewardAmount, setRewardAmount] = useState<number>(50);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash_meetup');
   const [paymentNote, setPaymentNote] = useState<string>('');
-  const [payerRole, setPayerRole] = useState<'creator' | 'fulfiller'>('fulfiller');
-  
-  // Smart Pickers: Time (Default 2 hours)
+  const [paymentDirection, setPaymentDirection] = useState<PaymentDirection>('accepter_pays');
+
+  // Deadline Picker (Capsules + native datetime-local)
   const [timeOption, setTimeOption] = useState<TimeOption>('2h');
-  const [customTimeText, setCustomTimeText] = useState<string>('今日 18:00 前');
-  
+  const [deadlineValue, setDeadlineValue] = useState<string>(() =>
+    toDatetimeLocalValue(computePresetDeadline('2h'))
+  );
+
   // Additional Options
   const [isAnonymous, setIsAnonymous] = useState<boolean>(false);
   const [femaleOnly, setFemaleOnly] = useState<boolean>(false);
-  
-  // AI Refine state
+
   const [isRefining, setIsRefining] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  const presetLocations = [
-    { name: '綜院', zone: 'downhill', isFemaleDorm: false },
-    { name: '商館', zone: 'downhill', isFemaleDorm: false },
-    { name: '季陶樓', zone: 'downhill', isFemaleDorm: false },
-    { name: '果夫樓', zone: 'downhill', isFemaleDorm: false },
-    { name: '山上綜合大樓', zone: 'uphill', isFemaleDorm: false },
-    { name: '莊敬舍', zone: 'dorms', isFemaleDorm: true },
-  ];
-
   const handleSelectCategory = (newCat: PostCategory) => {
     setCategory(newCat);
-    if (newCat === 'emergency' || newCat === 'tutor') {
-      setPayerRole('creator');
+    if (newCat === 'emergency' || newCat === 'tutor' || newCat === 'skill') {
+      setPaymentDirection('creator_pays');
     } else {
-      setPayerRole('fulfiller');
+      setPaymentDirection('accepter_pays');
     }
     if (newCat === 'leftovers') {
       setPriceType('free');
     }
   };
 
-  // AI Refine Text Feature
+  const handleSelectTimePreset = (preset: '30m' | '1h' | '2h' | 'tonight' | 'tomorrow') => {
+    setTimeOption(preset);
+    setDeadlineValue(toDatetimeLocalValue(computePresetDeadline(preset)));
+  };
+
   const handleAiRefine = () => {
     setIsRefining(true);
-
     setTimeout(() => {
       setIsRefining(false);
-      const targetLoc = isCustomLoc ? (customLocationName || '政大校園') : selectedLocName;
+      const targetLoc = isCustomLoc ? customLocationName || '政大校園' : selectedLocName;
       const currentTitle = title.trim();
       const currentDesc = description.trim();
 
       if (category === 'emergency') {
-        setTitle(currentTitle ? `【校園急救】${currentTitle.replace(/【.*?】/g, '')}` : `【校園急救】${targetLoc} 急需物資支援`);
+        setTitle(
+          currentTitle
+            ? `【校園急救】${currentTitle.replace(/【.*?】/g, '')}`
+            : `【校園急救】${targetLoc} 急需物資支援`
+        );
         setDescription(
           currentDesc
-            ? `【求助地點】${targetLoc}\n【急難說明】${currentDesc}\n【付款說明】採線下/轉帳雙向確認，送達後立即確認結案！`
-            : `【求助地點】${targetLoc}\n【急難說明】現場急需備用物資支援，求好心政大同學協助送達！\n【感謝回饋】感謝政大學友伸出援手！`
+            ? `【求助地點】${targetLoc}\n【急難說明】${currentDesc}\n【確認方式】面交或轉帳確認後結案！`
+            : `【求助地點】${targetLoc}\n【急難說明】現場急需備用物資支援，求好心政大同學協助送達！`
         );
         setTitleEn(`[Urgent Help] Campus Mutual Aid at ${targetLoc}`);
-        setDescriptionEn(`Need immediate assistance at ${targetLoc}. Thank you for helping out!`);
+        setDescriptionEn(`Need immediate assistance at ${targetLoc}. Thank you!`);
       } else if (category === 'leftovers') {
-        setTitle(currentTitle ? `【即時剩食】${currentTitle.replace(/【.*?】/g, '')}` : `【即時剩食】${targetLoc} 多出 ${quotaCount} 份餐點免費自取`);
+        setTitle(
+          currentTitle
+            ? `【即時剩食】${currentTitle.replace(/【.*?】/g, '')}`
+            : `【即時剩食】${targetLoc} 多出 ${quotaCount} 份餐點免費自取`
+        );
         setDescription(
           currentDesc
-            ? `【取餐地點】${targetLoc}\n【餐點份數】共 ${quotaCount} 份\n【餐點資訊】${currentDesc}\n【惜食說明】活動多出乾淨餐點，歡迎政大同學免費領取。`
-            : `【取餐地點】${targetLoc}\n【餐點份數】共 ${quotaCount} 份\n【惜食說明】活動剛結束多出餐點，歡迎政大同學自備提袋免費自取，惜食減廢！`
+            ? `【取餐地點】${targetLoc}\n【餐點份數】共 ${quotaCount} 份\n【餐點資訊】${currentDesc}`
+            : `【取餐地點】${targetLoc}\n【餐點份數】共 ${quotaCount} 份\n【惜食說明】活動剛結束多出乾淨餐點，歡迎政大同學免費自取！`
         );
         setTitleEn(`[Leftover Food] ${quotaCount} Free Meals at ${targetLoc}`);
-        setDescriptionEn(`${quotaCount} extra meals from campus event available at ${targetLoc}. Free for NCCU students.`);
+        setDescriptionEn(`${quotaCount} extra meals available at ${targetLoc}.`);
       } else {
-        setTitle(currentTitle ? `【校園互助】${currentTitle.replace(/【.*?】/g, '')}` : `【校園互助】${targetLoc} 需求交流與面交`);
+        setTitle(
+          currentTitle
+            ? `【校園互助】${currentTitle.replace(/【.*?】/g, '')}`
+            : `【校園互助】${targetLoc} 需求交流與面交`
+        );
         setDescription(
           currentDesc
-            ? `【交涉地點】${targetLoc}\n【詳細內容】${currentDesc}\n【付款確認】採線下現金 / 事前轉帳雙向確認，雙方點擊後完成結案。`
-            : `【交涉地點】${targetLoc}\n【詳細內容】校園物品/車票/揪團交流\n【付款確認】線下/轉帳雙向確認結案。`
+            ? `【交涉地點】${targetLoc}\n【詳細內容】${currentDesc}`
+            : `【交涉地點】${targetLoc}\n【詳細內容】校園物品或互助需求交流，歡迎私訊確認。`
         );
         setTitleEn(`[Campus Aid] Mutual Exchange at ${targetLoc}`);
-        setDescriptionEn(`Campus exchange at ${targetLoc}. Dual payment confirmation supported.`);
+        setDescriptionEn(`Campus exchange at ${targetLoc}.`);
       }
-    }, 500);
+    }, 350);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
 
-    const locName = isCustomLoc ? (customLocationName || '政大校園') : selectedLocName;
-    const locZone: CampusZone = (locName.includes('山上') || locName.includes('綜合大樓'))
-      ? 'uphill'
-      : (locName.includes('舍') ? 'dorms' : 'downhill');
+    const matchedPreset = !isCustomLoc
+      ? PRESET_LOCATIONS.find((l) => l.name === selectedLocName)
+      : undefined;
+    const locName = isCustomLoc ? customLocationName.trim() || '政大校園' : selectedLocName;
+    const locZone: CampusZone = matchedPreset
+      ? matchedPreset.zone
+      : locName.includes('山上') || locName.includes('綜合大樓')
+        ? 'uphill'
+        : locName.includes('舍')
+          ? 'dorms'
+          : locName.includes('指南') || locName.includes('麥側')
+            ? 'off_campus'
+            : 'downhill';
 
-    const mins = timeOption === '15m' ? 15 : timeOption === '30m' ? 30 : timeOption === '1h' ? 60 : 120;
+    const locCoords = matchedPreset
+      ? { lat: matchedPreset.lat, lng: matchedPreset.lng }
+      : currentUser.currentCoordinates;
+
+    const parsedDeadlineMs = new Date(deadlineValue).getTime();
+    const expireAtMs =
+      !Number.isNaN(parsedDeadlineMs) && parsedDeadlineMs > Date.now()
+        ? parsedDeadlineMs
+        : Date.now() + 120 * 60000;
+    const mins = Math.max(5, Math.min(10080, Math.round((expireAtMs - Date.now()) / 60000)));
     const isQuotaCategory = category === 'leftovers' || category === 'group_buy';
 
-    setTimeout(() => {
-      onCreatePost({
-        creatorId: currentUser.id,
-        creatorName: currentUser.nickname || currentUser.name,
-        creatorGender: currentUser.gender,
-        creatorTrustScore: currentUser.trustScore,
-        isCreatorAnonymous: isAnonymous,
-        creatorAnonAlias: isAnonymous ? `政大隱形同學 #${Math.floor(1000 + Math.random() * 9000)}` : undefined,
-        category,
-        title: title.trim() || (category === 'leftovers' ? `${locName} 多出 ${quotaCount} 份餐點歡迎自取` : category === 'emergency' ? `${locName} 急需校園支援` : `${locName} 校園互助任務`),
-        titleEn: titleEn || title.trim() || 'Campus Mutual Aid Task',
-        description: description.trim() || '詳細交涉細節請點選申請接單後於 1-on-1 聊天室溝通。',
-        descriptionEn: descriptionEn || description.trim() || 'Campus task. Contact in chat.',
-        tags: [
-          category === 'emergency' ? '#緊急求救' : category === 'leftovers' ? '#即時剩食' : category === 'group_buy' ? '#揪團預購' : '#校園互助',
-          `#${locName.split(' ')[0]}`,
-          priceType === 'free' ? '#免費互助' : `#NT$${rewardAmount}`
-        ],
-        rewardAmount: priceType === 'free' ? 0 : Number(rewardAmount),
-        isNegotiable: false,
-        escrowDeposit: priceType === 'free' ? 0 : Number(rewardAmount),
-        paymentMethod: priceType === 'free' ? 'free_aid' : paymentMethod,
-        paymentNote: priceType === 'free' ? undefined : paymentNote.trim() || undefined,
-        payerRole: priceType === 'free' ? undefined : payerRole,
-        payerMarkedPaid: false,
-        payeeConfirmedReceived: false,
-        totalQuota: isQuotaCategory ? quotaCount : undefined,
-        remainingQuota: isQuotaCategory ? quotaCount : undefined,
-        claimedByUserIds: isQuotaCategory ? [] : undefined,
-        timeOption,
-        remainingMinutes: mins,
-        timeRemainingText: timeOption === 'custom_time' ? customTimeText : formatRemainingMinutes(mins, lang),
-        status: 'open',
-        locationName: locName,
-        locationZone: locZone,
-        femaleOnlyRecommended: femaleOnly,
-        minTrustScoreRequired: 60,
-        createdAt: '剛剛',
-        expiresAt: timeOption === '15m' ? '15 分鐘後' : timeOption === '30m' ? '30 分鐘後' : '2 小時後',
-      });
-      setIsSubmitting(false);
-      onClose();
-    }, 450);
+    const effectiveDirection: PaymentDirection =
+      priceType === 'free' ? 'free' : paymentDirection;
+
+    onCreatePost({
+      creatorId: currentUser.id,
+      creatorName: currentUser.nickname || currentUser.name,
+      creatorGender: currentUser.gender,
+      creatorTrustScore: currentUser.trustScore,
+      isCreatorAnonymous: isAnonymous,
+      category,
+      title:
+        title.trim() ||
+        (category === 'leftovers'
+          ? `${locName} 多出 ${quotaCount} 份餐點歡迎自取`
+          : category === 'emergency'
+            ? `${locName} 急需校園支援`
+            : `${locName} 校園互助任務`),
+      titleEn: titleEn || title.trim() || 'Campus Mutual Aid Task',
+      description:
+        description.trim() || '詳細交涉細節請點選申請接單後於 1-on-1 聊天室溝通。',
+      descriptionEn: descriptionEn || description.trim() || 'Campus task. Contact in chat.',
+      tags: [
+        category === 'emergency'
+          ? '#緊急求救'
+          : category === 'leftovers'
+            ? '#即時剩食'
+            : category === 'group_buy'
+              ? '#揪團預購'
+              : '#校園互助',
+        `#${locName.split(' ')[0]}`,
+        priceType === 'free' ? '#免費互助' : `#NT$${rewardAmount}`,
+      ],
+      rewardAmount: priceType === 'free' ? 0 : Number(rewardAmount),
+      isNegotiable: false,
+      escrowDeposit: priceType === 'free' ? 0 : Number(rewardAmount),
+      paymentMethod: priceType === 'free' ? 'free_aid' : paymentMethod,
+      paymentDirection: effectiveDirection,
+      paymentNote: priceType === 'free' ? undefined : paymentNote.trim() || undefined,
+      payerRole:
+        effectiveDirection === 'creator_pays'
+          ? 'creator'
+          : effectiveDirection === 'accepter_pays'
+            ? 'fulfiller'
+            : undefined,
+      totalQuota: isQuotaCategory ? quotaCount : 1,
+      remainingQuota: isQuotaCategory ? quotaCount : 1,
+      claimedByUserIds: [],
+      timeOption,
+      remainingMinutes: mins,
+      timeRemainingText: formatRemainingMinutes(mins, lang),
+      status: 'open',
+      locationName: locName,
+      locationCoordinates: locCoords,
+      locationZone: locZone,
+      femaleOnlyRecommended: femaleOnly,
+      minTrustScoreRequired: 60,
+      createdAt: '剛剛',
+      expiresAt: formatRemainingMinutes(mins, lang),
+      expireAtMs,
+    });
+
+    setIsSubmitting(false);
+    onClose();
   };
 
   const showQuotaSelector = category === 'leftovers' || category === 'group_buy';
@@ -187,7 +289,7 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
         <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between shrink-0 bg-slate-900 text-white">
           <div>
             <div className="text-[10px] font-mono text-emerald-400 font-bold uppercase tracking-wider">
-              NCCU LOOP · FLEXIBLE TASK ENGINE
+              NCCU LOOP
             </div>
             <h3 className="text-base font-bold text-white mt-0.5">
               {lang === 'zh' ? '發布校園任務與互助需求' : 'Create Campus Task & Mutual Aid'}
@@ -216,7 +318,7 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
                 { id: 'marketplace', label: '📦 二手用品', labelEn: '📦 Marketplace' },
                 { id: 'group_buy', label: '🛒 揪團預購', labelEn: '🛒 Group Buy' },
                 { id: 'tutor', label: '🎓 家教伴讀', labelEn: '🎓 Tutoring' },
-              ].map(cat => (
+              ].map((cat) => (
                 <button
                   key={cat.id}
                   type="button"
@@ -244,8 +346,8 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
                   </span>
                   <span className="text-[11px] text-amber-800">
                     {lang === 'zh'
-                      ? '每領取 1 份自動扣減，歸零才下架 (1~20)'
-                      : 'Decrements per claim until 0 left (1-20)'}
+                      ? '每有一位同學接單即減 1，名額歸零才下架'
+                      : 'Each claim reserves 1 spot independently until 0 left'}
                   </span>
                 </div>
               </div>
@@ -253,7 +355,7 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
               <div className="flex items-center gap-1.5 bg-white border border-amber-300 rounded-xl p-1">
                 <button
                   type="button"
-                  onClick={() => setQuotaCount(q => Math.max(1, q - 1))}
+                  onClick={() => setQuotaCount((q) => Math.max(1, q - 1))}
                   className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-amber-100 text-amber-900 cursor-pointer"
                 >
                   <Minus className="w-3.5 h-3.5" />
@@ -271,7 +373,7 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
                 />
                 <button
                   type="button"
-                  onClick={() => setQuotaCount(q => Math.min(20, q + 1))}
+                  onClick={() => setQuotaCount((q) => Math.min(20, q + 1))}
                   className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-amber-100 text-amber-900 cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -280,11 +382,11 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
             </div>
           )}
 
-          {/* AI Refine Button & Title Input */}
+          {/* Title Input */}
           <div className="space-y-1">
             <div className="flex items-center justify-between">
               <label className="block text-slate-700 font-bold">
-                {lang === 'zh' ? '任務標題 (空白自由輸入)' : 'Task Title (Custom)'}
+                {lang === 'zh' ? '任務標題' : 'Task Title'}
               </label>
               <button
                 type="button"
@@ -294,13 +396,13 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
               >
                 {isRefining ? (
                   <>
-                    <div className="w-3 h-3 border-2 border-emerald-700 border-t-transparent rounded-full animate-spin"></div>
+                    <div className="w-3 h-3 border-2 border-emerald-700 border-t-transparent rounded-full animate-spin" />
                     <span>{t.aiRefining}</span>
                   </>
                 ) : (
                   <>
                     <Wand2 className="w-3 h-3 text-emerald-600" />
-                    <span>{lang === 'zh' ? '✨ AI 潤飾 / 翻譯' : '✨ AI Refine / Translate'}</span>
+                    <span>{t.aiRefine}</span>
                   </>
                 )}
               </button>
@@ -311,7 +413,11 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder={lang === 'zh' ? '自由輸入標題 (例：法學院演講多出 5 份便當)...' : 'Enter custom task title...'}
+              placeholder={
+                lang === 'zh'
+                  ? '輸入標題（例：總圖門口多出 3 份便當自取）...'
+                  : 'Enter task title...'
+              }
               className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700"
             />
           </div>
@@ -319,32 +425,36 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
           {/* Content Description */}
           <div>
             <label className="block text-slate-700 font-bold mb-1">
-              {lang === 'zh' ? '詳細需求描述 (自由補充)' : 'Detailed Description'}
+              {lang === 'zh' ? '詳細需求描述' : 'Detailed Description'}
             </label>
             <textarea
               rows={3}
               required
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder={lang === 'zh' ? '請說明交付位置、物資細節或連絡方式...' : 'Meeting point, details, or notes...'}
+              placeholder={
+                lang === 'zh'
+                  ? '請說明交付位置、物資細節或聯絡注意事項...'
+                  : 'Meeting point, item details, or notes...'
+              }
               className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700 leading-relaxed font-sans"
             />
           </div>
 
-          {/* Smart Pickers: Location Selection */}
+          {/* Location Picker */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-slate-700 font-bold flex items-center gap-1">
                 <MapPin className="w-3.5 h-3.5 text-emerald-700" />
-                <span>{lang === 'zh' ? '地點選擇器 (NCCU LBS)' : 'Location Picker'}</span>
+                <span>{lang === 'zh' ? '面交／集合地點' : 'Campus Location'}</span>
               </label>
               <span className="text-[11px] text-slate-500 font-mono">
-                {isCustomLoc ? (customLocationName || '自訂地點') : selectedLocName}
+                {isCustomLoc ? customLocationName || '自訂地點' : selectedLocName}
               </span>
             </div>
 
             <div className="flex flex-wrap gap-1.5">
-              {presetLocations.map(loc => (
+              {PRESET_LOCATIONS.map((loc) => (
                 <button
                   key={loc.name}
                   type="button"
@@ -371,7 +481,7 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
                     : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
                 }`}
               >
-                + 自訂地點...
+                + {lang === 'zh' ? '自訂地點' : 'Custom'}
               </button>
             </div>
 
@@ -380,97 +490,96 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
                 type="text"
                 value={customLocationName}
                 onChange={(e) => setCustomLocationName(e.target.value)}
-                placeholder={lang === 'zh' ? '請輸入政大自訂地點 (例：達賢二樓、自強十舍)...' : 'Custom location...'}
+                placeholder={
+                  lang === 'zh'
+                    ? '請輸入政大校園或指南路地點（例：季陶樓一樓）...'
+                    : 'Enter custom campus spot...'
+                }
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700"
               />
             )}
           </div>
 
-          {/* Smart Pickers: Time Range */}
-          <div className="space-y-1.5">
-            <label className="text-slate-700 font-bold flex items-center justify-between">
-              <span className="flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5 text-emerald-700" />
-                <span>{lang === 'zh' ? '時限設定' : 'Time Limit'}</span>
-              </span>
-              <span className="text-[10px] text-emerald-700 font-mono font-medium">
-                {timeOption === '2h' ? '⚡ 預設 2 小時' : timeOption}
-              </span>
+          {/* Deadline Picker: Quick Capsules + Native datetime-local */}
+          <div className="space-y-2">
+            <label className="text-slate-700 font-bold flex items-center gap-1">
+              <Clock className="w-3.5 h-3.5 text-emerald-700" />
+              <span>{lang === 'zh' ? '截止時間設定' : 'Deadline'}</span>
             </label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-              <button
-                type="button"
-                onClick={() => setTimeOption('2h')}
-                className={`p-2 rounded-xl border text-center cursor-pointer text-xs ${
-                  timeOption === '2h' ? 'bg-emerald-50 border-emerald-600 text-emerald-950 font-bold shadow-2xs' : 'bg-slate-50 border-slate-200 text-slate-700'
-                }`}
-              >
-                2 小時 (預設)
-              </button>
-              <button
-                type="button"
-                onClick={() => setTimeOption('15m')}
-                className={`p-2 rounded-xl border text-center cursor-pointer text-xs ${
-                  timeOption === '15m' ? 'bg-rose-50 border-rose-500 text-rose-950 font-bold shadow-2xs' : 'bg-slate-50 border-slate-200 text-slate-700'
-                }`}
-              >
-                15 分鐘急件
-              </button>
-              <button
-                type="button"
-                onClick={() => setTimeOption('30m')}
-                className={`p-2 rounded-xl border text-center cursor-pointer text-xs ${
-                  timeOption === '30m' ? 'bg-amber-50 border-amber-500 text-amber-950 font-bold shadow-2xs' : 'bg-slate-50 border-slate-200 text-slate-700'
-                }`}
-              >
-                30 分鐘
-              </button>
-              <button
-                type="button"
-                onClick={() => setTimeOption('custom_time')}
-                className={`p-2 rounded-xl border text-center cursor-pointer text-xs ${
-                  timeOption === 'custom_time' ? 'bg-slate-900 text-white font-bold shadow-2xs' : 'bg-slate-50 border-slate-200 text-slate-700'
-                }`}
-              >
-                自訂時間
-              </button>
+
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { id: '30m', zh: '+30分鐘', en: '+30m' },
+                { id: '1h', zh: '+1小時', en: '+1h' },
+                { id: '2h', zh: '+2小時', en: '+2h' },
+                { id: 'tonight', zh: '今天晚上', en: 'Tonight' },
+                { id: 'tomorrow', zh: '明天', en: 'Tomorrow' },
+              ].map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() =>
+                    handleSelectTimePreset(
+                      opt.id as '30m' | '1h' | '2h' | 'tonight' | 'tomorrow'
+                    )
+                  }
+                  className={`px-3 py-1.5 rounded-full border text-xs cursor-pointer transition-all ${
+                    timeOption === opt.id
+                      ? 'bg-slate-900 text-white border-slate-900 font-bold shadow-2xs'
+                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  {lang === 'zh' ? opt.zh : opt.en}
+                </button>
+              ))}
             </div>
-            {timeOption === 'custom_time' && (
+
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500 shrink-0">
+                {lang === 'zh' ? '精確截止時間：' : 'Exact Deadline:'}
+              </span>
               <input
-                type="text"
-                value={customTimeText}
-                onChange={(e) => setCustomTimeText(e.target.value)}
-                placeholder="例如：今日 14:00 前、本週五中午..."
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs"
+                type="datetime-local"
+                value={deadlineValue}
+                min={toDatetimeLocalValue(new Date())}
+                onChange={(e) => {
+                  setTimeOption('custom_time');
+                  setDeadlineValue(e.target.value);
+                }}
+                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 font-mono focus:outline-none focus:ring-1 focus:ring-emerald-700"
               />
-            )}
+            </div>
           </div>
 
-          {/* Manual Payment Confirmation System (No auto-charge API) */}
+          {/* Pricing & Explicit Payment Direction */}
           <div className="p-3.5 bg-slate-50 border border-slate-200/90 rounded-2xl space-y-3">
             <div className="flex items-center justify-between">
               <label className="font-bold text-slate-900 flex items-center gap-1">
                 <Wallet className="w-3.5 h-3.5 text-emerald-700" />
-                <span>{lang === 'zh' ? '價格與手動金流確認制' : 'Pricing & Manual Payment'}</span>
+                <span>{lang === 'zh' ? '價格與交易付款方向' : 'Price & Payment Direction'}</span>
               </label>
               <div className="flex gap-1 text-[11px]">
                 <button
                   type="button"
                   onClick={() => setPriceType('free')}
                   className={`px-2.5 py-1 rounded-lg cursor-pointer transition-all ${
-                    priceType === 'free' ? 'bg-emerald-700 text-white font-bold shadow-2xs' : 'text-slate-600 hover:bg-slate-200'
+                    priceType === 'free'
+                      ? 'bg-emerald-700 text-white font-bold shadow-2xs'
+                      : 'text-slate-600 hover:bg-slate-200'
                   }`}
                 >
-                  免費互助
+                  {lang === 'zh' ? '0 元免費互助' : 'Free Aid'}
                 </button>
                 <button
                   type="button"
                   onClick={() => setPriceType('fixed')}
                   className={`px-2.5 py-1 rounded-lg cursor-pointer transition-all ${
-                    priceType === 'fixed' ? 'bg-slate-900 text-white font-bold shadow-2xs' : 'text-slate-600 hover:bg-slate-200'
+                    priceType === 'fixed'
+                      ? 'bg-slate-900 text-white font-bold shadow-2xs'
+                      : 'text-slate-600 hover:bg-slate-200'
                   }`}
                 >
-                  自訂金額
+                  {lang === 'zh' ? '自訂金額' : 'Paid'}
                 </button>
               </div>
             </div>
@@ -478,7 +587,9 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
             {priceType === 'fixed' ? (
               <div className="space-y-3 pt-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-600 text-xs">{lang === 'zh' ? '任務/分攤金額：' : 'Amount (NTD):'}</span>
+                  <span className="text-slate-600 text-xs">
+                    {lang === 'zh' ? '金額（新台幣）：' : 'Amount (NTD):'}
+                  </span>
                   <div className="flex items-center gap-1">
                     <span className="font-bold font-mono">NT$</span>
                     <input
@@ -492,10 +603,47 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
                   </div>
                 </div>
 
+                {/* Clear Payment Direction Selector */}
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-semibold text-slate-700 block">
+                    {lang === 'zh' ? '誰付款、誰收款（交易方向）：' : 'Who Pays Whom:'}
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentDirection('creator_pays')}
+                      className={`p-2.5 rounded-xl border text-left cursor-pointer text-xs transition-all ${
+                        paymentDirection === 'creator_pays'
+                          ? 'bg-emerald-50 border-emerald-600 text-emerald-950 font-bold shadow-2xs'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div>🙋 {lang === 'zh' ? '發布者付錢請人幫忙' : 'Creator Pays Accepter'}</div>
+                      <div className="text-[10px] font-normal text-slate-500 mt-0.5">
+                        {lang === 'zh' ? '例：徵代買、徵家教、徵求物資' : 'e.g. Errands, Tutoring'}
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentDirection('accepter_pays')}
+                      className={`p-2.5 rounded-xl border text-left cursor-pointer text-xs transition-all ${
+                        paymentDirection === 'accepter_pays'
+                          ? 'bg-emerald-50 border-emerald-600 text-emerald-950 font-bold shadow-2xs'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div>🛍️ {lang === 'zh' ? '接單者付錢購買/領取' : 'Accepter Pays Creator'}</div>
+                      <div className="text-[10px] font-normal text-slate-500 mt-0.5">
+                        {lang === 'zh' ? '例：二手出清、團購分售、有償剩食' : 'e.g. Resale, Group Buy'}
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Payment Mode Selection */}
                 <div>
                   <span className="text-[11px] text-slate-500 block mb-1">
-                    {lang === 'zh' ? '選擇支付方式（線下/轉帳雙向確認，不預扣款）：' : 'Select Payment Mode (Dual Confirmation):'}
+                    {lang === 'zh' ? '交易付款方式：' : 'Payment Method:'}
                   </span>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     <button
@@ -507,7 +655,7 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
                           : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
                       }`}
                     >
-                      💵 面交現金
+                      💵 {lang === 'zh' ? '面交現金' : 'Cash at Meetup'}
                     </button>
                     <button
                       type="button"
@@ -518,32 +666,7 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
                           : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
                       }`}
                     >
-                      📲 事前轉帳（街口 / 台灣 Pay / Line Pay）
-                    </button>
-                  </div>
-                </div>
-
-                {/* Payment Flow Direction */}
-                <div className="flex items-center justify-between text-[11px] text-slate-600 pt-0.5">
-                  <span>{lang === 'zh' ? '金流角色方向：' : 'Payment Direction:'}</span>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setPayerRole('fulfiller')}
-                      className={`px-2 py-0.5 rounded-md border cursor-pointer ${
-                        payerRole === 'fulfiller' ? 'bg-emerald-50 border-emerald-500 text-emerald-900 font-bold' : 'bg-white border-slate-200'
-                      }`}
-                    >
-                      對方付給我
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPayerRole('creator')}
-                      className={`px-2 py-0.5 rounded-md border cursor-pointer ${
-                        payerRole === 'creator' ? 'bg-emerald-50 border-emerald-500 text-emerald-900 font-bold' : 'bg-white border-slate-200'
-                      }`}
-                    >
-                      我付謝禮給對方
+                      📲 {lang === 'zh' ? '轉帳（街口 / 台灣 Pay / Line Pay）' : 'Transfer (JKOPAY / Line Pay)'}
                     </button>
                   </div>
                 </div>
@@ -551,20 +674,24 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
                 {/* Optional Account / Payment Link Note */}
                 <div>
                   <label className="text-[11px] text-slate-600 font-medium block mb-1">
-                    {lang === 'zh' ? '收款帳號或收款連結備註 (選填)' : 'Payment Account / Link Note (Optional)'}
+                    {lang === 'zh' ? '收款帳號或面交備註 (選填)' : 'Payment Note (Optional)'}
                   </label>
                   <input
                     type="text"
                     value={paymentNote}
                     onChange={(e) => setPaymentNote(e.target.value)}
-                    placeholder={lang === 'zh' ? '例：街口帳號 901234567 / Line Pay 現場掃碼...' : 'e.g. JKOPAY ID / Line Pay QR at meetup...'}
+                    placeholder={
+                      lang === 'zh'
+                        ? '例：街口帳號 901234567 / 現場掃 Line Pay...'
+                        : 'e.g. JKOPAY ID / Line Pay QR at meetup...'
+                    }
                     className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
                   />
                 </div>
               </div>
             ) : (
               <div className="text-xs text-emerald-900 bg-emerald-50/80 p-2.5 rounded-xl border border-emerald-200/80">
-                ❤️ 本任務為純互助無償分享，無需付款，雙方於聊天室確認即可完成！
+                ❤️ {lang === 'zh' ? '本任務為 0 元免費互助/贈送，面交後雙方確認完成即可！' : 'Free mutual aid — no payment needed!'}
               </div>
             )}
           </div>
@@ -572,7 +699,7 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
           {/* Additional Options */}
           <div className="space-y-2 pt-1 border-t border-slate-100">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-              {lang === 'zh' ? '附加選項 (Additional Options)' : 'Additional Options'}
+              {lang === 'zh' ? '隱私與提醒設定' : 'Privacy & Reminders'}
             </span>
 
             <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
@@ -580,10 +707,12 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
                 <UserX className="w-4 h-4 text-slate-600" />
                 <div>
                   <span className="font-bold text-slate-900 block text-xs">
-                    {lang === 'zh' ? '雙向匿名發布' : 'Post Anonymously'}
+                    {lang === 'zh' ? '匿名防護發布' : 'Post Anonymously'}
                   </span>
                   <span className="text-[11px] text-slate-500">
-                    {lang === 'zh' ? '遮蔽姓名與照片，雙方同意後才可揭示身分' : 'Mask profile; reveal only on mutual consent'}
+                    {lang === 'zh'
+                      ? '卡片將隱藏您的暱稱並顯示「🛡️ 匿名防護中」'
+                      : 'Masks your nickname on the lobby card'}
                   </span>
                 </div>
               </div>
@@ -600,10 +729,10 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
                 <ShieldAlert className="w-4 h-4 text-rose-600" />
                 <div>
                   <span className="font-bold text-slate-900 block text-xs">
-                    {lang === 'zh' ? '僅限女宿 / 特定條件提醒 (附加標籤)' : 'Female Dorm Reminder (Non-blocking)'}
+                    {lang === 'zh' ? '女宿 / 建議女性接單提醒' : 'Female Dorm Reminder'}
                   </span>
                   <span className="text-[11px] text-slate-500">
-                    {lang === 'zh' ? '作為友善提醒標籤顯示於卡片中，非強制阻擋' : 'Friendly recommendation tag on card'}
+                    {lang === 'zh' ? '顯示友善提醒標籤，不作系統強制阻擋' : 'Friendly tag on card'}
                   </span>
                 </div>
               </div>
@@ -637,7 +766,7 @@ export const PostCreateModal: React.FC<PostCreateModalProps> = ({
               ) : (
                 <span>
                   {lang === 'zh'
-                    ? `發布任務（${paymentMethod === 'cash_meetup' ? '面交現金' : '事前轉帳'} · NT$ ${rewardAmount}）`
+                    ? `發布任務（NT$ ${rewardAmount}）`
                     : `Publish Task (NT$ ${rewardAmount})`}
                 </span>
               )}

@@ -1,5 +1,3 @@
-import { Language } from '../types';
-
 export const I18N = {
   zh: {
     appName: 'NCCU LOOP',
@@ -9,14 +7,14 @@ export const I18N = {
     uphill: '山上校區',
     dorms: '宿舍區',
     allZones: '全校區',
-    
-    // 5 Core Tabs
+
+    // Core Tabs
     tabFeed: '大廳',
     tabFlash: '快閃/急件',
     tabChats: '訊息',
     tabPost: '發布',
     tabProfile: '個人',
-    
+
     // Top dynamic pill filters
     pillAll: '全部',
     pillRecommended: '追蹤推薦',
@@ -24,77 +22,75 @@ export const I18N = {
     pillEmergency: '緊急求救',
     pillTraffic: '交通',
     pillMarket: '二手/其他',
-    pillClosest: '離我最近',
+    pillClosest: '由近到遠',
     pillLatest: '最新發布',
-    
+
     // Card labels
-    free: '免費自取',
+    free: '免費互助',
     negotiable: '可議價',
     timeLeft: '剩餘',
     distance: '距離',
-    
+
     // Post Modal & Pickers
     createTitle: '發布校園任務',
-    titlePlaceholder: '請輸入標題 (支援完全自由輸入)...',
-    descPlaceholder: '詳細內容說明 (自填無限制)...',
-    aiRefine: '✨ AI 潤飾',
-    aiRefining: 'Gemini 潤飾中...',
-    locationPicker: '地點選擇器 (NCCU LBS)',
+    titlePlaceholder: '請輸入標題 (支援自由輸入)...',
+    descPlaceholder: '詳細內容說明...',
+    aiRefine: '✨ 潤飾內容',
+    aiRefining: '潤飾整理中...',
+    locationPicker: '校園地點選擇',
     customLocation: '自填地點',
-    timeOption: '時限設定',
-    time2h: '預設 2 小時 (推薦剩食/出清)',
-    time15m: '15 分鐘內 (極急件)',
-    time30m: '30 分鐘內 (急救推薦)',
-    time1h: '1 小時內',
-    pricing: '價格與金流',
-    femaleReminder: '女宿進入提醒 (次要標籤，非強制阻擋)',
-    anonymousToggle: '雙向匿名發布',
-    publishBtn: '確認預扣款發布',
+    timeOption: '截止時間設定',
+    time2h: '+2小時',
+    time15m: '15 分鐘內',
+    time30m: '+30分鐘',
+    time1h: '+1小時',
+    pricing: '價格與付款方向',
+    femaleReminder: '女宿進入提醒 (友善標籤，非強制阻擋)',
+    anonymousToggle: '匿名防護發布',
+    publishBtn: '發布任務',
     publishFreeBtn: '免費發布互助',
-    
+
     // Chats & Disputes
     activeChatsTitle: '進行中的任務與對話',
     noActiveChats: '目前沒有進行中的對話。於大廳申請接單或發布任務成立後，即可在此即時私訊！',
     openChat: '進入聊天室',
-    quickPhrases: '快捷回復',
-    reportDispute: '舉報 / 求助',
-    disputeTitle: '提出檢舉申訴 (Dispute & Report)',
-    disputeReason: '請選擇檢舉原因',
-    disputeHarassment: '言語騷擾 / 不當言行',
-    disputeNoShow: '未完成任務 / 放鴿子',
-    disputeMaliciousCancel: '信用瑕疵 / 惡意棄單',
-    disputeFraud: '詐騙 / 不實商品或服務',
+    quickPhrases: '快捷回覆',
+    reportDispute: '舉報',
+    disputeTitle: '提出舉報申訴',
+    disputeReason: '請選擇違規類型',
+    disputeNoShow: '放鳥未到',
+    disputeMoney: '金錢糾紛',
+    disputeHarassment: '騷擾不當言論',
+    disputeImpersonation: '假冒身分',
     disputeOther: '其他爭議事項',
-    submitDispute: '送出申訴並凍結託管款',
-    aiRefineBtn: '✨ AI 潤飾',
-    techSpecs: '系統規格與架構',
+    submitDispute: '送出舉報',
     post: '發布',
-    revealedStatus: '雙方已公開真實學號與檔案',
-    revealRequested: '已提出身分揭示請求，等待對方同意',
-    requestReveal: '邀請公開真實身分',
-    
+    revealedStatus: '雙方已同意解除匿名',
+    revealRequested: '已同意解除匿名，等待對方同意',
+    requestReveal: '同意解除匿名',
+
     // Onboarding
-    onboardingTitle: '政大學生極簡三步驗證',
-    step1: '1. Webmail 雙重驗證',
+    onboardingTitle: '政大學生三步快速驗證',
+    step1: '1. 政大信箱驗證',
     step2: '2. 設置個人檔案',
-    step3: '3. 綁定金流 (選填)',
+    step3: '3. 收付款偏好 (選填)',
   },
   en: {
     appName: 'NCCU LOOP',
     appSub: 'Campus Mutual Aid Hub',
-    tagline: 'Minimalist & Trusted P2P Campus Network',
+    tagline: 'Minimalist & Trusted Campus Network',
     downhill: 'Downhill',
     uphill: 'Uphill',
     dorms: 'Dorms Area',
     allZones: 'All Zones',
-    
-    // 5 Core Tabs
+
+    // Core Tabs
     tabFeed: 'Feed',
     tabFlash: 'Flash',
     tabChats: 'Chats',
     tabPost: 'Post',
     tabProfile: 'Profile',
-    
+
     // Top dynamic pill filters
     pillAll: 'All',
     pillRecommended: 'For You',
@@ -102,59 +98,57 @@ export const I18N = {
     pillEmergency: 'Emergency SOS',
     pillTraffic: 'Traffic',
     pillMarket: 'Secondhand/Other',
-    pillClosest: 'Closest',
+    pillClosest: 'Nearest First',
     pillLatest: 'Latest',
-    
+
     // Card labels
-    free: 'Free',
+    free: 'Free Aid',
     negotiable: 'Negotiable',
     timeLeft: 'Left',
     distance: 'Distance',
-    
+
     // Post Modal & Pickers
     createTitle: 'Create Campus Task',
-    titlePlaceholder: 'Custom task title (fully flexible)...',
-    descPlaceholder: 'Custom description (no restrictions)...',
-    aiRefine: '✨ AI Refine',
-    aiRefining: 'Gemini refining...',
-    locationPicker: 'NCCU Location Picker',
+    titlePlaceholder: 'Enter task title...',
+    descPlaceholder: 'Detailed description...',
+    aiRefine: '✨ Polish Text',
+    aiRefining: 'Polishing...',
+    locationPicker: 'Campus Location',
     customLocation: 'Custom Location',
-    timeOption: 'Time Limit',
-    time2h: 'Default 2 Hours (Food/Inventory)',
-    time15m: 'Within 15 Mins (Urgent)',
-    time30m: 'Within 30 Mins (SOS)',
-    time1h: 'Within 1 Hour',
-    pricing: 'Pricing & Gateways',
+    timeOption: 'Deadline',
+    time2h: '+2h',
+    time15m: '15m',
+    time30m: '+30m',
+    time1h: '+1h',
+    pricing: 'Price & Payment Direction',
     femaleReminder: 'Female Dorm Reminder (Non-blocking tag)',
     anonymousToggle: 'Post Anonymously',
-    publishBtn: 'Confirm Escrow & Publish',
+    publishBtn: 'Publish Task',
     publishFreeBtn: 'Publish Free Task',
-    
+
     // Chats & Disputes
     activeChatsTitle: 'Active Tasks & 1-on-1 Chats',
-    noActiveChats: 'No active chats. Once a task claim is accepted, your private 1-on-1 chat room will appear here!',
+    noActiveChats: 'No active chats yet. Claim a task in the feed to open a 1-on-1 chat!',
     openChat: 'Open Chat',
     quickPhrases: 'Quick Phrases',
-    reportDispute: 'Report / Dispute',
-    disputeTitle: 'File Dispute & Report',
-    disputeReason: 'Select Dispute Reason',
-    disputeHarassment: 'Harassment / Inappropriate Conduct',
-    disputeNoShow: 'No-Show / Unfulfilled Task',
-    disputeMaliciousCancel: 'Credit Breach / Malicious Cancellation',
-    disputeFraud: 'Fraud / Misrepresented Item',
-    disputeOther: 'Other Dispute Issue',
-    submitDispute: 'Submit Dispute & Freeze Escrow',
-    aiRefineBtn: '✨ AI Refine',
-    techSpecs: 'Architecture & Specs',
+    reportDispute: 'Report',
+    disputeTitle: 'Submit Safety Report',
+    disputeReason: 'Violation Category',
+    disputeNoShow: 'No-Show',
+    disputeMoney: 'Payment Dispute',
+    disputeHarassment: 'Harassment / Abuse',
+    disputeImpersonation: 'Impersonation',
+    disputeOther: 'Other Issue',
+    submitDispute: 'Submit Report',
     post: 'Post',
     revealedStatus: 'Mutual Real Identity Revealed',
-    revealRequested: 'Identity reveal requested, awaiting acceptance',
-    requestReveal: 'Request Identity Reveal',
-    
+    revealRequested: 'Agreed to reveal, awaiting peer',
+    requestReveal: 'Consent to Reveal ID',
+
     // Onboarding
     onboardingTitle: '3-Step Student Onboarding',
-    step1: '1. Webmail OTP',
+    step1: '1. NCCU Email Sign-In',
     step2: '2. Profile Setup',
-    step3: '3. Payment Binding',
+    step3: '3. Payment Preferences',
   },
 };
