@@ -2,6 +2,8 @@ export type CampusZone = 'downhill' | 'uphill' | 'dorms' | 'off_campus';
 
 export type Language = 'zh' | 'en';
 
+export type BiologicalSex = 'female' | 'male';
+
 export interface CampusLocation {
   id: string;
   name: string;
@@ -33,9 +35,9 @@ export type EmergencySubcategory =
 export type PostStatus =
   | 'draft'
   | 'open'
-  | 'pending_accept'     // 階段一：接單申請中（待發布者確認）
-  | 'in_progress'        // 階段二：進行中 & 1-on-1 聊天室開啟
-  | 'pending_completion' // 階段三：一方確認結案
+  | 'pending_accept'     // 接單申請中（待發布者審核）
+  | 'in_progress'        // 進行中 & 1-on-1 聊天室開啟
+  | 'pending_completion' // 一方確認結案
   | 'completed'          // 雙方確認結案
   | 'disputed'           // 申訴凍結中
   | 'cancelled'
@@ -55,7 +57,15 @@ export type PaymentMethod =
 
 export type PaymentDirection = 'creator_pays' | 'accepter_pays' | 'free';
 
-export type TimeOption = '15m' | '30m' | '1h' | '2h' | 'tonight' | 'tomorrow' | 'custom_time' | 'flexible';
+export type TimeOption =
+  | '15m'
+  | '30m'
+  | '1h'
+  | '2h'
+  | 'tonight'
+  | 'tomorrow'
+  | 'custom_time'
+  | 'flexible';
 
 export interface UserProfile {
   id: string;
@@ -65,6 +75,7 @@ export interface UserProfile {
   nickname: string;
   realName: string;
   nameEn: string;
+  biologicalSex?: BiologicalSex;
   gender?: 'female' | 'male' | 'undisclosed' | 'other';
   avatar: string;
   department: string;
@@ -87,14 +98,30 @@ export interface UserProfile {
   boundPaymentGateways: string[];
 }
 
+export interface PublicProfileItem {
+  uid: string;
+  nickname: string;
+  biologicalSex?: BiologicalSex;
+  department: string;
+  year: string;
+  dormLocation?: string;
+  zone?: CampusZone;
+  bio?: string;
+  canTutorSubjects?: string[];
+  trustScore: number;
+  helpCount: number;
+}
+
 export interface PostItem {
   id: string;
   creatorId: string;
   creatorName: string;
+  creatorRealName?: string;
   creatorGender?: 'female' | 'male' | 'undisclosed' | 'other';
   creatorTrustScore: number;
   isCreatorAnonymous?: boolean;
   creatorAnonAlias?: string;
+  isFemaleDormOnly?: boolean;
 
   category: PostCategory;
   subcategory?: EmergencySubcategory;
@@ -144,7 +171,11 @@ export interface PostItem {
 
   creatorConfirmedCompleted?: boolean;
   fulfillerConfirmedCompleted?: boolean;
-  identityRevealStatus?: 'none' | 'requested_by_creator' | 'requested_by_fulfiller' | 'mutual_revealed';
+  identityRevealStatus?:
+    | 'none'
+    | 'requested_by_creator'
+    | 'requested_by_fulfiller'
+    | 'mutual_revealed';
 
   createdAt: string;
   expiresAt: string;
@@ -176,19 +207,33 @@ export type DisputeCategory =
   | 'fraud'            // 詐騙 / 不實商品
   | 'other';           // 其他
 
+export type ReportStatus =
+  | 'pending_review'
+  | 'submitted'
+  | 'frozen_escrow'
+  | 'confirmed_violation'
+  | 'dismissed';
+
 export interface ReportItem {
   id: string;
   orderId?: string;
   taskId: string;
   taskTitle?: string;
   reporterId: string;
+  reporterEmail?: string;
   reporterName?: string;
   reportedUserId?: string;
   reportedUserName?: string;
   reasonCategory: DisputeCategory;
   description: string;
-  status: 'submitted' | 'frozen_escrow' | 'confirmed_violation' | 'dismissed';
+  evidenceUrl?: string;
+  status: ReportStatus;
+  aiSummary?: string;
+  adminNote?: string;
+  reviewedBy?: string;
+  reviewedAtMs?: number;
   createdAt: string;
+  createdAtMs?: number;
 }
 
 export interface EscrowTransaction {
@@ -211,6 +256,7 @@ export interface EscrowTransaction {
 }
 
 export type OrderStatus =
+  | 'pending_approval'
   | 'pending_confirm'
   | 'in_progress'
   | 'completed'
@@ -231,6 +277,7 @@ export interface OrderItem {
   paymentNote?: string;
   payerRole?: 'creator' | 'fulfiller';
   taskExpireAt?: number;
+  isFemaleDormOnly?: boolean;
   creatorUid: string;
   creatorName: string;
   creatorRealName?: string;

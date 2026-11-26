@@ -5,6 +5,8 @@ import {
   calculateHaversineDistanceMeters,
   findNearestLandmark,
   formatDistance,
+  localizeLocationName,
+  isFemaleDormLocationName,
   MANUAL_CAMPUS_AREAS,
   Coordinates,
 } from '../utils/lbs';
@@ -56,7 +58,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
         const closestLandmark = findNearestLandmark(coords);
         onUpdateLocation(
           coords,
-          closestLandmark.landmark.name,
+          lang === 'zh' ? closestLandmark.landmark.name : closestLandmark.landmark.nameEn,
           closestLandmark.landmark.zone
         );
         setGeoStatus('gps');
@@ -75,7 +77,11 @@ export const FeedView: React.FC<FeedViewProps> = ({
     if (!area) return;
     setManualAreaId(areaId);
     setGeoStatus('idle');
-    onUpdateLocation(area.coordinates, area.labelZh, area.zone);
+    onUpdateLocation(
+      area.coordinates,
+      lang === 'zh' ? area.labelZh : area.labelEn,
+      area.zone
+    );
   };
 
   const matchesFollowedTag = (post: PostItem) => {
@@ -106,6 +112,14 @@ export const FeedView: React.FC<FeedViewProps> = ({
       p.status === 'cancelled' ||
       (p.remainingQuota !== undefined && p.remainingQuota <= 0);
     if (isDelisted) return false;
+
+    // STRICT BIOLOGICAL SEX ISOLATION FOR FEMALE DORMS
+    const isFemaleTask = Boolean(
+      p.isFemaleDormOnly || isFemaleDormLocationName(p.locationName)
+    );
+    if (isFemaleTask && currentUser.biologicalSex !== 'female') {
+      return false;
+    }
 
     if (mode === 'flash') {
       const isFlashTask = p.category === 'leftovers' || p.category === 'emergency';
@@ -162,6 +176,11 @@ export const FeedView: React.FC<FeedViewProps> = ({
         ];
 
   const currentPillValue = mode === 'flash' ? flashSubFilter : activeFilter;
+  const nearestLabel = localizeLocationName(
+    nearest.landmark.name,
+    lang,
+    nearest.landmark.nameEn
+  );
 
   return (
     <div className="space-y-4 pb-24">
@@ -177,8 +196,8 @@ export const FeedView: React.FC<FeedViewProps> = ({
                 <span>{lang === 'zh' ? '📍 校園定位' : '📍 Campus Location'}</span>
                 <span className="font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md text-[11px] tabular-nums">
                   {lang === 'zh'
-                    ? `距${nearest.landmark.name} ${formatDistance(nearest.distanceMeters)}`
-                    : `${formatDistance(nearest.distanceMeters)} from ${nearest.landmark.nameEn}`}
+                    ? `距${nearestLabel} ${formatDistance(nearest.distanceMeters)}`
+                    : `${formatDistance(nearest.distanceMeters)} from ${nearestLabel}`}
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 truncate mt-0.5">
@@ -220,7 +239,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
           </button>
         </div>
 
-        {/* Manual Zone Selector Fallback (山下校區 / 山上校區 / 指南路) */}
+        {/* Manual Zone Selector Fallback */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-[11px] text-slate-400 mr-0.5">

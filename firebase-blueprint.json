@@ -2,14 +2,15 @@
   "entities": {
     "UserProfile": {
       "title": "UserProfile",
-      "description": "NCCU verified student profile stored under users/{userId}",
+      "description": "NCCU verified member profile stored under users/{userId}",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "nccuEmail": { "type": "string", "format": "email", "maxLength": 128, "pattern": "^[a-zA-Z0-9._%+\\-]+@g\\.nccu\\.edu\\.tw$" },
+        "nccuEmail": { "type": "string", "format": "email", "maxLength": 128, "pattern": "^[a-zA-Z0-9._%+\\-]+@(g\\.)?nccu\\.edu\\.tw$" },
         "studentId": { "type": "string", "maxLength": 64 },
         "nickname": { "type": "string", "maxLength": 64 },
         "realName": { "type": "string", "maxLength": 64 },
+        "biologicalSex": { "type": "string", "enum": ["female", "male"] },
         "department": { "type": "string", "maxLength": 64 },
         "year": { "type": "string", "maxLength": 32 },
         "dormLocation": { "type": "string", "maxLength": 64 },
@@ -25,6 +26,26 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "nccuEmail", "nickname", "isVerifiedStudent", "updatedAt"]
+    },
+    "PublicProfile": {
+      "title": "PublicProfile",
+      "description": "Sanitized non-PII campus profile visible upon mutual reveal stored under public_profiles/{userId}",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "nickname": { "type": "string", "maxLength": 64 },
+        "biologicalSex": { "type": "string", "enum": ["female", "male"] },
+        "department": { "type": "string", "maxLength": 64 },
+        "year": { "type": "string", "maxLength": 32 },
+        "dormLocation": { "type": "string", "maxLength": 64 },
+        "bio": { "type": "string", "maxLength": 300 },
+        "zone": { "type": "string", "enum": ["downhill", "uphill", "dorms", "off_campus"] },
+        "canTutorSubjects": { "type": "array" },
+        "trustScore": { "type": "number" },
+        "helpCount": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "nickname", "trustScore", "helpCount", "updatedAt"]
     },
     "TaskItem": {
       "title": "TaskItem",
@@ -49,10 +70,12 @@
         "remainingQuantity": { "type": "number" },
         "totalQuota": { "type": "number" },
         "isAnonymous": { "type": "boolean" },
+        "isFemaleDormOnly": { "type": "boolean" },
         "femaleOnlyRecommended": { "type": "boolean" },
         "tags": { "type": "array" },
         "creatorUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "creatorName": { "type": "string", "maxLength": 64 },
+        "creatorRealName": { "type": "string", "maxLength": 64 },
         "creatorEmail": { "type": "string", "maxLength": 128 },
         "creatorTrustScore": { "type": "number" },
         "status": { "type": "string", "enum": ["open", "in_progress", "completed", "closed", "expired", "cancelled"] },
@@ -79,6 +102,7 @@
         "paymentNote": { "type": "string", "maxLength": 200 },
         "payerRole": { "type": "string", "enum": ["creator", "fulfiller"] },
         "taskExpireAt": { "type": "number" },
+        "isFemaleDormOnly": { "type": "boolean" },
         "creatorUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "creatorName": { "type": "string", "maxLength": 64 },
         "creatorRealName": { "type": "string", "maxLength": 64 },
@@ -87,7 +111,7 @@
         "accepterName": { "type": "string", "maxLength": 64 },
         "accepterRealName": { "type": "string", "maxLength": 64 },
         "accepterAnonymous": { "type": "boolean" },
-        "status": { "type": "string", "enum": ["pending_confirm", "in_progress", "completed", "disputed", "cancelled"] },
+        "status": { "type": "string", "enum": ["pending_approval", "pending_confirm", "in_progress", "completed", "disputed", "cancelled"] },
         "creatorPaidConfirmed": { "type": "boolean" },
         "accepterPaidConfirmed": { "type": "boolean" },
         "creatorDoneConfirmed": { "type": "boolean" },
@@ -137,16 +161,24 @@
     },
     "ReportItem": {
       "title": "ReportItem",
-      "description": "Structured safety or dispute report stored under reports/{reportId}",
+      "description": "Structured safety or dispute report with evidence stored under reports/{reportId}",
       "type": "object",
       "properties": {
         "orderId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "taskId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "taskTitle": { "type": "string", "maxLength": 160 },
         "reporterUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "reporterEmail": { "type": "string", "maxLength": 128 },
         "reportedUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "reportedName": { "type": "string", "maxLength": 64 },
         "reasonCategory": { "type": "string", "enum": ["no_show", "money_dispute", "harassment", "impersonation", "malicious_cancel", "fraud", "other"] },
         "description": { "type": "string", "maxLength": 1000 },
-        "status": { "type": "string", "enum": ["submitted", "frozen_escrow", "confirmed_violation", "dismissed"] },
+        "evidenceUrl": { "type": "string", "maxLength": 250000 },
+        "status": { "type": "string", "enum": ["pending_review", "submitted", "frozen_escrow", "confirmed_violation", "dismissed"] },
+        "aiSummary": { "type": "string", "maxLength": 1000 },
+        "adminNote": { "type": "string", "maxLength": 500 },
+        "reviewedBy": { "type": "string", "maxLength": 128 },
+        "reviewedAtMs": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["taskId", "reporterUid", "reasonCategory", "description", "status", "createdAt"]
@@ -155,7 +187,11 @@
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserProfile" },
-      "description": "Verified NCCU student profile (owner-only read/write)"
+      "description": "Verified NCCU member profile (owner or admin read/update)"
+    },
+    "/public_profiles/{userId}": {
+      "schema": { "$ref": "#/entities/PublicProfile" },
+      "description": "Sanitized non-PII campus profile for unlocked order participants"
     },
     "/tasks/{taskId}": {
       "schema": { "$ref": "#/entities/TaskItem" },
@@ -167,7 +203,7 @@
     },
     "/orders/{orderId}/messages/{messageId}": {
       "schema": { "$ref": "#/entities/OrderMessage" },
-      "description": "1-on-1 messages scoped to participants of the parent order"
+      "description": "1-on-1 messages scoped to participants of the parent order or admins"
     },
     "/reviews/{reviewId}": {
       "schema": { "$ref": "#/entities/ReviewItem" },
@@ -175,7 +211,7 @@
     },
     "/reports/{reportId}": {
       "schema": { "$ref": "#/entities/ReportItem" },
-      "description": "Structured abuse and dispute reports"
+      "description": "Structured abuse and dispute reports pending admin review"
     }
   }
 }

@@ -12,12 +12,22 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Strict NCCU Google Account Verification Gate (@g.nccu.edu.tw + verified email)
+    // Strict NCCU Member Verification Gate (@g.nccu.edu.tw OR @nccu.edu.tw + verified email)
     function isNccuStudent() {
       return isSignedIn()
         && request.auth.token.email_verified == true
         && request.auth.token.email is string
-        && request.auth.token.email.matches('^[a-zA-Z0-9._%+\\-]+@g\\.nccu\\.edu\\.tw$');
+        && request.auth.token.email.matches('^[a-zA-Z0-9._%+\\-]+@(g\\.)?nccu\\.edu\\.tw$');
+    }
+
+    function isAdmin() {
+      return isNccuStudent()
+        && request.auth.token.email in [
+          '112501064@g.nccu.edu.tw',
+          'admin@nccu.edu.tw',
+          'admin@g.nccu.edu.tw',
+          'ncculoop.admin@nccu.edu.tw'
+        ];
     }
 
     function isOwner(userId) {
@@ -40,19 +50,19 @@ service cloud.firestore {
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'nccuEmail', 'nickname', 'isVerifiedStudent', 'updatedAt'])
         && data.keys().hasOnly([
-          'uid', 'nccuEmail', 'studentId', 'nickname', 'realName', 'department', 'year',
-          'dormLocation', 'bio', 'gender', 'zone', 'canTutorSubjects',
-          'subscribedTags', 'trustScore', 'helpCount', 'completedTasks', 'isVerifiedStudent', 'updatedAt'
+          'uid', 'nccuEmail', 'studentId', 'nickname', 'realName', 'biologicalSex',
+          'department', 'year', 'dormLocation', 'bio', 'gender', 'zone',
+          'canTutorSubjects', 'subscribedTags', 'trustScore', 'helpCount',
+          'completedTasks', 'isVerifiedStudent', 'updatedAt'
         ])
         && isValidId(data.uid)
-        && data.uid == request.auth.uid
         && data.nccuEmail is string
         && data.nccuEmail.size() <= 128
-        && data.nccuEmail == request.auth.token.email
         && data.nickname is string
         && data.nickname.size() >= 1
         && data.nickname.size() <= 64
         && (!('realName' in data) || (data.realName is string && data.realName.size() <= 64))
+        && (!('biologicalSex' in data) || (data.biologicalSex in ['female', 'male']))
         && data.isVerifiedStudent is bool
         && data.isVerifiedStudent == true
         && data.updatedAt is timestamp
@@ -70,6 +80,26 @@ service cloud.firestore {
         && (!('completedTasks' in data) || (data.completedTasks is number && data.completedTasks >= 0 && data.completedTasks <= 100000));
     }
 
+    function isValidPublicProfile(data) {
+      return data.keys().hasAll(['uid', 'nickname', 'trustScore', 'helpCount', 'updatedAt'])
+        && data.keys().hasOnly([
+          'uid', 'nickname', 'biologicalSex', 'department', 'year', 'dormLocation',
+          'bio', 'zone', 'canTutorSubjects', 'trustScore', 'helpCount', 'updatedAt'
+        ])
+        && isValidId(data.uid)
+        && data.nickname is string && data.nickname.size() >= 1 && data.nickname.size() <= 64
+        && (!('biologicalSex' in data) || (data.biologicalSex in ['female', 'male']))
+        && (!('department' in data) || (data.department is string && data.department.size() <= 64))
+        && (!('year' in data) || (data.year is string && data.year.size() <= 32))
+        && (!('dormLocation' in data) || (data.dormLocation is string && data.dormLocation.size() <= 64))
+        && (!('bio' in data) || (data.bio is string && data.bio.size() <= 300))
+        && (!('zone' in data) || (data.zone in ['downhill', 'uphill', 'dorms', 'off_campus']))
+        && (!('canTutorSubjects' in data) || (data.canTutorSubjects is list && data.canTutorSubjects.size() <= 30 && (data.canTutorSubjects.size() == 0 || data.canTutorSubjects[0] is string)))
+        && data.trustScore is number && data.trustScore >= 0 && data.trustScore <= 100
+        && data.helpCount is number && data.helpCount >= 0 && data.helpCount <= 100000
+        && data.updatedAt is timestamp;
+    }
+
     function isValidTask(data) {
       return data.keys().hasAll([
           'title', 'description', 'category', 'location', 'price',
@@ -80,8 +110,9 @@ service cloud.firestore {
           'title', 'titleEn', 'description', 'descriptionEn', 'category',
           'location', 'locationZone', 'locationLat', 'locationLng',
           'price', 'paymentMethod', 'paymentDirection', 'paymentNote', 'payerRole',
-          'quantity', 'remainingQuantity', 'totalQuota', 'isAnonymous', 'femaleOnlyRecommended',
-          'tags', 'creatorUid', 'creatorName', 'creatorEmail', 'creatorTrustScore',
+          'quantity', 'remainingQuantity', 'totalQuota',
+          'isAnonymous', 'isFemaleDormOnly', 'femaleOnlyRecommended',
+          'tags', 'creatorUid', 'creatorName', 'creatorRealName', 'creatorEmail', 'creatorTrustScore',
           'status', 'timeOption', 'remainingMinutes', 'expireAt', 'createdAt', 'updatedAt'
         ])
         && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
@@ -102,10 +133,12 @@ service cloud.firestore {
         && (!('remainingQuantity' in data) || (data.remainingQuantity is number && data.remainingQuantity >= 0 && data.remainingQuantity <= 20))
         && (!('totalQuota' in data) || (data.totalQuota is number && data.totalQuota >= 1 && data.totalQuota <= 20))
         && data.isAnonymous is bool
+        && (!('isFemaleDormOnly' in data) || (data.isFemaleDormOnly is bool && (data.isFemaleDormOnly == false || data.isAnonymous == false)))
         && (!('femaleOnlyRecommended' in data) || data.femaleOnlyRecommended is bool)
         && (!('tags' in data) || (data.tags is list && data.tags.size() <= 10 && (data.tags.size() == 0 || data.tags[0] is string)))
         && isValidId(data.creatorUid)
         && data.creatorName is string && data.creatorName.size() >= 1 && data.creatorName.size() <= 64
+        && (!('creatorRealName' in data) || (data.creatorRealName is string && data.creatorRealName.size() <= 64))
         && data.creatorEmail is string && data.creatorEmail.size() <= 128
         && (!('creatorTrustScore' in data) || (data.creatorTrustScore is number && data.creatorTrustScore >= 0 && data.creatorTrustScore <= 100))
         && data.status in ['open', 'in_progress', 'completed', 'closed', 'expired', 'cancelled']
@@ -128,6 +161,7 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'taskId', 'taskCategory', 'taskTitle', 'taskTitleEn', 'taskLocation', 'taskLocationEn',
           'taskPrice', 'paymentMethod', 'paymentDirection', 'paymentNote', 'payerRole', 'taskExpireAt',
+          'isFemaleDormOnly',
           'creatorUid', 'creatorName', 'creatorRealName', 'creatorAnonymous', 'creatorAnonAlias',
           'accepterUid', 'accepterName', 'accepterRealName', 'accepterAnonymous', 'accepterAnonAlias',
           'status', 'creatorPaidConfirmed', 'accepterPaidConfirmed',
@@ -147,6 +181,7 @@ service cloud.firestore {
         && (!('paymentNote' in data) || (data.paymentNote is string && data.paymentNote.size() <= 200))
         && (!('payerRole' in data) || (data.payerRole in ['creator', 'fulfiller']))
         && (!('taskExpireAt' in data) || data.taskExpireAt is number)
+        && (!('isFemaleDormOnly' in data) || data.isFemaleDormOnly is bool)
         && isValidId(data.creatorUid)
         && data.creatorName is string && data.creatorName.size() >= 1 && data.creatorName.size() <= 64
         && (!('creatorRealName' in data) || (data.creatorRealName is string && data.creatorRealName.size() <= 64))
@@ -157,7 +192,7 @@ service cloud.firestore {
         && (!('accepterRealName' in data) || (data.accepterRealName is string && data.accepterRealName.size() <= 64))
         && data.accepterAnonymous is bool
         && (!('accepterAnonAlias' in data) || (data.accepterAnonAlias is string && data.accepterAnonAlias.size() <= 64))
-        && data.status in ['pending_confirm', 'in_progress', 'completed', 'disputed', 'cancelled']
+        && data.status in ['pending_approval', 'pending_confirm', 'in_progress', 'completed', 'disputed', 'cancelled']
         && data.creatorPaidConfirmed is bool
         && data.accepterPaidConfirmed is bool
         && data.creatorDoneConfirmed is bool
@@ -210,15 +245,27 @@ service cloud.firestore {
 
     function isValidReport(data) {
       return data.keys().hasAll(['taskId', 'reporterUid', 'reasonCategory', 'description', 'status', 'createdAt'])
-        && data.keys().hasOnly(['orderId', 'taskId', 'reporterUid', 'reportedUid', 'reasonCategory', 'description', 'status', 'createdAt'])
+        && data.keys().hasOnly([
+          'orderId', 'taskId', 'taskTitle', 'reporterUid', 'reporterEmail',
+          'reportedUid', 'reportedName', 'reasonCategory', 'description',
+          'evidenceUrl', 'status', 'aiSummary', 'adminNote', 'reviewedBy',
+          'reviewedAtMs', 'createdAt'
+        ])
         && (!('orderId' in data) || isValidId(data.orderId))
         && isValidId(data.taskId)
+        && (!('taskTitle' in data) || (data.taskTitle is string && data.taskTitle.size() <= 160))
         && isValidId(data.reporterUid)
-        && data.reporterUid == request.auth.uid
+        && (!('reporterEmail' in data) || (data.reporterEmail is string && data.reporterEmail.size() <= 128))
         && (!('reportedUid' in data) || isValidId(data.reportedUid))
+        && (!('reportedName' in data) || (data.reportedName is string && data.reportedName.size() <= 64))
         && data.reasonCategory in ['no_show', 'money_dispute', 'harassment', 'impersonation', 'malicious_cancel', 'fraud', 'other']
         && data.description is string && data.description.size() >= 1 && data.description.size() <= 1000
-        && data.status in ['submitted', 'frozen_escrow', 'confirmed_violation', 'dismissed']
+        && (!('evidenceUrl' in data) || (data.evidenceUrl is string && data.evidenceUrl.size() <= 250000))
+        && data.status in ['pending_review', 'submitted', 'frozen_escrow', 'confirmed_violation', 'dismissed']
+        && (!('aiSummary' in data) || (data.aiSummary is string && data.aiSummary.size() <= 1000))
+        && (!('adminNote' in data) || (data.adminNote is string && data.adminNote.size() <= 500))
+        && (!('reviewedBy' in data) || (data.reviewedBy is string && data.reviewedBy.size() <= 128))
+        && (!('reviewedAtMs' in data) || data.reviewedAtMs is number)
         && data.createdAt is timestamp;
     }
 
@@ -229,29 +276,47 @@ service cloud.firestore {
 
     // --- Collection Rules ---
 
-    // 1. Users (PII isolated strictly to account owner with verified @g.nccu.edu.tw email)
+    // 1. Users (PII isolated strictly to account owner + admin review enforcement)
     match /users/{userId} {
-      allow get: if isValidId(userId) && isOwner(userId);
-      allow list: if isNccuStudent() && resource.data.uid == request.auth.uid;
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isNccuStudent() && (resource.data.uid == request.auth.uid || isAdmin());
       allow create: if isValidId(userId)
         && isOwner(userId)
         && isValidUser(incoming())
         && incoming().uid == userId
+        && incoming().nccuEmail == request.auth.token.email
         && incoming().updatedAt == request.time
         && (!('trustScore' in incoming()) || incoming().trustScore == 90)
         && (!('helpCount' in incoming()) || incoming().helpCount == 0)
         && (!('completedTasks' in incoming()) || incoming().completedTasks == 0);
       allow update: if isValidId(userId)
-        && isOwner(userId)
         && isValidUser(incoming())
         && incoming().uid == existing().uid
         && incoming().nccuEmail == existing().nccuEmail
         && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly([
-          'nickname', 'realName', 'department', 'year', 'dormLocation', 'zone',
-          'bio', 'gender', 'canTutorSubjects', 'subscribedTags',
-          'trustScore', 'helpCount', 'completedTasks', 'updatedAt'
-        ]);
+        && (
+          (isOwner(userId)
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'nickname', 'realName', 'biologicalSex', 'department', 'year', 'dormLocation', 'zone',
+              'bio', 'gender', 'canTutorSubjects', 'subscribedTags',
+              'trustScore', 'helpCount', 'completedTasks', 'updatedAt'
+            ]))
+          ||
+          (isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly(['trustScore', 'updatedAt']))
+        );
+      allow delete: if false;
+    }
+
+    // 1b. Public Profiles (Non-PII campus metrics fetched by UID on mutual reveal)
+    match /public_profiles/{userId} {
+      allow get: if isValidId(userId) && isNccuStudent();
+      allow list: if false;
+      allow create, update: if isValidId(userId)
+        && (isOwner(userId) || isAdmin())
+        && isValidPublicProfile(incoming())
+        && incoming().uid == userId
+        && incoming().updatedAt == request.time;
       allow delete: if false;
     }
 
@@ -259,7 +324,7 @@ service cloud.firestore {
     match /tasks/{taskId} {
       allow get: if isValidId(taskId) && isNccuStudent();
       allow list: if isNccuStudent()
-        && (resource.data.status == 'open' || resource.data.creatorUid == request.auth.uid);
+        && (resource.data.status == 'open' || resource.data.creatorUid == request.auth.uid || isAdmin());
       allow create: if isValidId(taskId)
         && isNccuStudent()
         && isValidTask(incoming())
@@ -279,8 +344,12 @@ service cloud.firestore {
         && (
           (existing().creatorUid == request.auth.uid
             && incoming().diff(existing()).affectedKeys().hasOnly([
-              'price', 'paymentMethod', 'paymentDirection', 'paymentNote', 'status',
-              'expireAt', 'remainingMinutes', 'updatedAt'
+              'title', 'titleEn', 'description', 'descriptionEn',
+              'location', 'locationZone', 'locationLat', 'locationLng',
+              'price', 'paymentMethod', 'paymentDirection', 'paymentNote', 'payerRole',
+              'isFemaleDormOnly', 'femaleOnlyRecommended', 'isAnonymous', 'tags',
+              'quantity', 'remainingQuantity', 'totalQuota', 'status',
+              'timeOption', 'expireAt', 'remainingMinutes', 'updatedAt'
             ]))
           ||
           (existing().creatorUid != request.auth.uid
@@ -294,22 +363,30 @@ service cloud.firestore {
     match /orders/{orderId} {
       allow get: if isValidId(orderId)
         && isNccuStudent()
-        && (existing().creatorUid == request.auth.uid || existing().accepterUid == request.auth.uid);
+        && (existing().creatorUid == request.auth.uid || existing().accepterUid == request.auth.uid || isAdmin());
       allow list: if isNccuStudent()
-        && (resource.data.creatorUid == request.auth.uid || resource.data.accepterUid == request.auth.uid);
+        && (resource.data.creatorUid == request.auth.uid || resource.data.accepterUid == request.auth.uid || isAdmin());
       allow create: if isValidId(orderId)
         && isNccuStudent()
         && exists(/databases/$(database)/documents/tasks/$(incoming().taskId))
         && isValidOrder(incoming())
         && incoming().accepterUid == request.auth.uid
         && incoming().creatorUid != request.auth.uid
-        && incoming().status == 'pending_confirm'
+        && incoming().status in ['pending_approval', 'pending_confirm']
         && incoming().creatorPaidConfirmed == false
         && incoming().accepterPaidConfirmed == false
         && incoming().creatorDoneConfirmed == false
         && incoming().accepterDoneConfirmed == false
-        && incoming().revealCreator == false
-        && incoming().revealAccepter == false
+        && (
+          (incoming().revealCreator == false && incoming().revealAccepter == false)
+          ||
+          (('isFemaleDormOnly' in incoming())
+            && incoming().isFemaleDormOnly == true
+            && incoming().creatorAnonymous == false
+            && incoming().accepterAnonymous == false
+            && incoming().revealCreator == true
+            && incoming().revealAccepter == true)
+        )
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
       allow update: if isValidId(orderId)
@@ -340,8 +417,8 @@ service cloud.firestore {
 
       // 3a. 1-on-1 Chat Messages Subcollection
       match /messages/{messageId} {
-        allow get: if isValidId(orderId) && isValidId(messageId) && isNccuStudent() && isOrderParticipant(orderId);
-        allow list: if isValidId(orderId) && isNccuStudent() && isOrderParticipant(orderId);
+        allow get: if isValidId(orderId) && isValidId(messageId) && isNccuStudent() && (isOrderParticipant(orderId) || isAdmin());
+        allow list: if isValidId(orderId) && isNccuStudent() && (isOrderParticipant(orderId) || isAdmin());
         allow create: if isValidId(orderId)
           && isValidId(messageId)
           && isNccuStudent()
@@ -354,13 +431,11 @@ service cloud.firestore {
       }
     }
 
-    // 4. Reviews & Ratings (Scoped strictly to completed order participants)
+    // 4. Reviews & Ratings (Non-PII feedback read by verified members for unlocked order review)
     match /reviews/{reviewId} {
-      allow get: if isValidId(reviewId)
-        && isNccuStudent()
-        && (existing().revieweeUid == request.auth.uid || existing().reviewerUid == request.auth.uid);
+      allow get: if isValidId(reviewId) && isNccuStudent();
       allow list: if isNccuStudent()
-        && (resource.data.revieweeUid == request.auth.uid || resource.data.reviewerUid == request.auth.uid);
+        && (resource.data.revieweeUid is string || resource.data.reviewerUid == request.auth.uid);
       allow create: if isValidId(reviewId)
         && isNccuStudent()
         && exists(/databases/$(database)/documents/orders/$(incoming().orderId))
@@ -372,22 +447,31 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // 5. Reports & Disputes
+    // 5. Reports & Admin Review Console
     match /reports/{reportId} {
       allow get: if isValidId(reportId)
         && isNccuStudent()
-        && (existing().reporterUid == request.auth.uid || existing().reportedUid == request.auth.uid);
+        && (existing().reporterUid == request.auth.uid || existing().reportedUid == request.auth.uid || isAdmin());
       allow list: if isNccuStudent()
-        && (resource.data.reporterUid == request.auth.uid || resource.data.reportedUid == request.auth.uid);
+        && (resource.data.reporterUid == request.auth.uid || resource.data.reportedUid == request.auth.uid || isAdmin());
       allow create: if isValidId(reportId)
         && isNccuStudent()
         && exists(/databases/$(database)/documents/tasks/$(incoming().taskId))
         && (!('orderId' in incoming()) || exists(/databases/$(database)/documents/orders/$(incoming().orderId)))
         && isValidReport(incoming())
         && incoming().reporterUid == request.auth.uid
-        && incoming().status in ['submitted', 'frozen_escrow']
+        && incoming().status in ['pending_review', 'submitted', 'frozen_escrow']
         && incoming().createdAt == request.time;
-      allow update, delete: if false;
+      allow update: if isValidId(reportId)
+        && isAdmin()
+        && isValidReport(incoming())
+        && incoming().taskId == existing().taskId
+        && incoming().reporterUid == existing().reporterUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'aiSummary', 'adminNote', 'reviewedBy', 'reviewedAtMs'
+        ]);
+      allow delete: if false;
     }
   }
 }

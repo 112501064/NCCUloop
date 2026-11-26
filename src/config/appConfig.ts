@@ -70,3 +70,22 @@ export const APP_CONFIG: AppConfig = {
   // 預設過期時限 (小時) - 適合即時清剩食與二手出清，避免久置
   defaultExpireHours: 2,
 };
+
+export const ADMIN_EMAILS: string[] = [
+  '112501064@g.nccu.edu.tw',
+  'admin@nccu.edu.tw',
+  'admin@g.nccu.edu.tw',
+  'ncculoop.admin@nccu.edu.tw',
+];
+
+export function isAdminEmail(email?: string | null): boolean {
+  if (!email) return false;
+  return ADMIN_EMAILS.includes(email.trim().toLowerCase());
+}
+
+export function isAllowedNccuEmail(email?: string | null): boolean {
+  if (!email) return false;
+  const lower = email.trim().toLowerCase();
+  return lower.endsWith('@g.nccu.edu.tw') || lower.endsWith('@nccu.edu.tw');
+}
+

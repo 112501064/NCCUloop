@@ -5,6 +5,7 @@ import {
   getDoc,
   setDoc,
   updateDoc,
+  deleteDoc,
   addDoc,
   collection,
   query,
@@ -16,6 +17,7 @@ import {
   DocumentData,
 } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
+import { isAdminEmail, isAllowedNccuEmail } from './config/appConfig';
 import {
   UserProfile,
   PostItem,
@@ -31,10 +33,15 @@ import {
   PostCategory,
   TimeOption,
   PostStatus,
+  BiologicalSex,
 } from './types';
 import { DEMO_USERS, INITIAL_POSTS } from './data/mockData';
 import { formatRemainingMinutes } from './utils/formatters';
-import { Coordinates } from './utils/lbs';
+import {
+  Coordinates,
+  isFemaleDormLocationName,
+  localizeLocationName,
+} from './utils/lbs';
 import { AppHeader } from './components/AppHeader';
 import { BottomNavigation, AppNavTab } from './components/BottomNavigation';
 import { FeedView } from './components/FeedView';
@@ -45,8 +52,9 @@ import { PostCreateModal } from './components/PostCreateModal';
 import { TranscriptVerifyModal } from './components/TranscriptVerifyModal';
 import { ChatRoomModal } from './components/ChatRoomModal';
 import { ReportDisputeModal } from './components/ReportDisputeModal';
+import { AdminReviewModal } from './components/AdminReviewModal';
 import { OnboardingGate } from './components/OnboardingGate';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, Trash2, AlertTriangle } from 'lucide-react';
 
 const STORAGE_KEYS = {
   ONBOARDED: 'nccu_loop_onboarded_v1',
@@ -126,14 +134,18 @@ function mapTaskDocToPostItem(
     typeof d.totalQuota === 'number' ? d.totalQuota : Math.max(1, remainingQuantity);
   const price = typeof d.price === 'number' ? d.price : 0;
   const paymentDirection = normalizePaymentDirection(price, d.paymentDirection, d.payerRole);
+  const locName = String(d.location || '政大校園');
+  const isFemaleDormOnly = Boolean(d.isFemaleDormOnly || isFemaleDormLocationName(locName));
 
   return {
     id: docSnap.id,
     creatorId: String(d.creatorUid || ''),
     creatorName: String(d.creatorName || '政大同學'),
+    creatorRealName: d.creatorRealName ? String(d.creatorRealName) : undefined,
     creatorTrustScore: typeof d.creatorTrustScore === 'number' ? d.creatorTrustScore : 90,
-    isCreatorAnonymous: Boolean(d.isAnonymous),
-    creatorAnonAlias: d.isAnonymous ? '匿名同學' : undefined,
+    isCreatorAnonymous: isFemaleDormOnly ? false : Boolean(d.isAnonymous),
+    creatorAnonAlias: !isFemaleDormOnly && d.isAnonymous ? '匿名同學' : undefined,
+    isFemaleDormOnly,
     category: (d.category as PostCategory) || 'marketplace',
     title: String(d.title || '無標題任務'),
     titleEn: d.titleEn ? String(d.titleEn) : undefined,
@@ -157,14 +169,18 @@ function mapTaskDocToPostItem(
     remainingMinutes: minsLeft,
     timeRemainingText: formatRemainingMinutes(minsLeft, lang),
     status: (d.status as PostStatus) || 'open',
-    locationName: String(d.location || '政大校園'),
-    locationNameEn: String(d.location || 'NCCU Campus'),
+    locationName: locName,
+    locationNameEn: localizeLocationName(
+      locName,
+      'en',
+      d.locationEn ? String(d.locationEn) : undefined
+    ),
     locationCoordinates: {
       lat: typeof d.locationLat === 'number' ? d.locationLat : 24.9866,
       lng: typeof d.locationLng === 'number' ? d.locationLng : 121.5766,
     },
     locationZone: (d.locationZone as CampusZone) || 'downhill',
-    femaleOnlyRecommended: Boolean(d.femaleOnlyRecommended),
+    femaleOnlyRecommended: Boolean(d.femaleOnlyRecommended || isFemaleDormOnly),
     minTrustScoreRequired: 60,
     createdAt: formatRelativeCreatedAt(createdAtMs, lang),
     expiresAt: formatRemainingMinutes(minsLeft, lang),
@@ -179,6 +195,8 @@ function mapOrderDocToOrderItem(docSnap: QueryDocumentSnapshot<DocumentData>): O
   const updatedTs = d.updatedAt?.toDate ? (d.updatedAt.toDate() as Date) : null;
   const taskPrice = typeof d.taskPrice === 'number' ? d.taskPrice : 0;
   const paymentDirection = normalizePaymentDirection(taskPrice, d.paymentDirection, d.payerRole);
+  const taskLoc = String(d.taskLocation || '政大校園');
+  const isFemaleDormOnly = Boolean(d.isFemaleDormOnly || isFemaleDormLocationName(taskLoc));
 
   return {
     id: docSnap.id,
@@ -186,8 +204,10 @@ function mapOrderDocToOrderItem(docSnap: QueryDocumentSnapshot<DocumentData>): O
     taskCategory: (d.taskCategory as PostCategory) || 'marketplace',
     taskTitle: String(d.taskTitle || ''),
     taskTitleEn: d.taskTitleEn ? String(d.taskTitleEn) : undefined,
-    taskLocation: String(d.taskLocation || '政大校園'),
-    taskLocationEn: d.taskLocationEn ? String(d.taskLocationEn) : undefined,
+    taskLocation: taskLoc,
+    taskLocationEn: d.taskLocationEn
+      ? String(d.taskLocationEn)
+      : localizeLocationName(taskLoc, 'en'),
     taskPrice,
     paymentMethod: (d.paymentMethod as PaymentMethod) || 'cash_meetup',
     paymentDirection,
@@ -199,23 +219,24 @@ function mapOrderDocToOrderItem(docSnap: QueryDocumentSnapshot<DocumentData>): O
           ? 'fulfiller'
           : undefined,
     taskExpireAt: typeof d.taskExpireAt === 'number' ? d.taskExpireAt : undefined,
+    isFemaleDormOnly,
     creatorUid: String(d.creatorUid || ''),
     creatorName: String(d.creatorName || '政大同學'),
     creatorRealName: d.creatorRealName ? String(d.creatorRealName) : undefined,
-    creatorAnonymous: Boolean(d.creatorAnonymous),
+    creatorAnonymous: isFemaleDormOnly ? false : Boolean(d.creatorAnonymous),
     creatorAnonAlias: d.creatorAnonAlias ? String(d.creatorAnonAlias) : undefined,
     accepterUid: String(d.accepterUid || ''),
     accepterName: String(d.accepterName || '政大同學'),
     accepterRealName: d.accepterRealName ? String(d.accepterRealName) : undefined,
-    accepterAnonymous: Boolean(d.accepterAnonymous),
+    accepterAnonymous: isFemaleDormOnly ? false : Boolean(d.accepterAnonymous),
     accepterAnonAlias: d.accepterAnonAlias ? String(d.accepterAnonAlias) : undefined,
-    status: (d.status as OrderItem['status']) || 'pending_confirm',
+    status: (d.status as OrderItem['status']) || 'pending_approval',
     creatorPaidConfirmed: Boolean(d.creatorPaidConfirmed),
     accepterPaidConfirmed: Boolean(d.accepterPaidConfirmed),
     creatorDoneConfirmed: Boolean(d.creatorDoneConfirmed),
     accepterDoneConfirmed: Boolean(d.accepterDoneConfirmed),
-    revealCreator: Boolean(d.revealCreator),
-    revealAccepter: Boolean(d.revealAccepter),
+    revealCreator: isFemaleDormOnly ? true : Boolean(d.revealCreator),
+    revealAccepter: isFemaleDormOnly ? true : Boolean(d.revealAccepter),
     completedAtMs: typeof d.completedAtMs === 'number' ? d.completedAtMs : undefined,
     disputeReason: d.disputeReason ? String(d.disputeReason) : undefined,
     disputedByUid: d.disputedByUid ? String(d.disputedByUid) : undefined,
@@ -241,6 +262,31 @@ function mapReviewDocToReviewItem(docSnap: QueryDocumentSnapshot<DocumentData>):
     tags: Array.isArray(d.tags) ? d.tags.map(String) : [],
     comment: d.comment ? String(d.comment) : '',
     scoreDelta: typeof d.scoreDelta === 'number' ? d.scoreDelta : 0,
+    createdAtMs: createdTs ? createdTs.getTime() : Date.now(),
+  };
+}
+
+function mapReportDocToReportItem(docSnap: QueryDocumentSnapshot<DocumentData>): ReportItem {
+  const d = docSnap.data();
+  const createdTs = d.createdAt?.toDate ? (d.createdAt.toDate() as Date) : null;
+  return {
+    id: docSnap.id,
+    orderId: d.orderId ? String(d.orderId) : undefined,
+    taskId: String(d.taskId || ''),
+    taskTitle: d.taskTitle ? String(d.taskTitle) : undefined,
+    reporterId: String(d.reporterUid || ''),
+    reporterEmail: d.reporterEmail ? String(d.reporterEmail) : undefined,
+    reportedUserId: d.reportedUid ? String(d.reportedUid) : undefined,
+    reportedUserName: d.reportedName ? String(d.reportedName) : undefined,
+    reasonCategory: (d.reasonCategory as DisputeCategory) || 'other',
+    description: String(d.description || ''),
+    evidenceUrl: d.evidenceUrl ? String(d.evidenceUrl) : undefined,
+    status: (d.status as ReportItem['status']) || 'pending_review',
+    aiSummary: d.aiSummary ? String(d.aiSummary) : undefined,
+    adminNote: d.adminNote ? String(d.adminNote) : undefined,
+    reviewedBy: d.reviewedBy ? String(d.reviewedBy) : undefined,
+    reviewedAtMs: typeof d.reviewedAtMs === 'number' ? d.reviewedAtMs : undefined,
+    createdAt: createdTs ? createdTs.toLocaleDateString('zh-TW') : '剛剛',
     createdAtMs: createdTs ? createdTs.getTime() : Date.now(),
   };
 }
@@ -271,12 +317,13 @@ export default function App() {
     readStorage<UserProfile>(STORAGE_KEYS.USER, DEMO_USERS[0])
   );
 
-  // Firebase Auth state
+  // Firebase Auth state (Supports both @g.nccu.edu.tw AND @nccu.edu.tw)
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(() => auth.currentUser);
   const [userDocExists, setUserDocExists] = useState<boolean>(false);
   const isFirebaseVerified = Boolean(
-    firebaseUser && firebaseUser.email?.toLowerCase().endsWith('@g.nccu.edu.tw')
+    firebaseUser && isAllowedNccuEmail(firebaseUser.email)
   );
+  const isAdminUser = isAdminEmail(firebaseUser?.email || currentUser.nccuEmail);
 
   // Local fallback state (Dev Demo Mode)
   const [localPosts, setLocalPosts] = useState<PostItem[]>(() =>
@@ -301,6 +348,7 @@ export default function App() {
   const [firestoreReceivedReviews, setFirestoreReceivedReviews] = useState<ReviewItem[]>([]);
   const [firestoreGivenReviews, setFirestoreGivenReviews] = useState<ReviewItem[]>([]);
   const [firestoreReportsAgainstMe, setFirestoreReportsAgainstMe] = useState<ReportItem[]>([]);
+  const [firestoreAdminReports, setFirestoreAdminReports] = useState<ReportItem[]>([]);
   const [ordersReady, setOrdersReady] = useState<boolean>(false);
   const [reviewsReady, setReviewsReady] = useState<boolean>(false);
   const [reportsReady, setReportsReady] = useState<boolean>(false);
@@ -328,6 +376,10 @@ export default function App() {
         : localReports.filter((r) => r.reportedUserId === currentUser.id),
     [isFirebaseVerified, firestoreReportsAgainstMe, localReports, currentUser.id]
   );
+  const adminReports = useMemo(
+    () => (isFirebaseVerified ? firestoreAdminReports : localReports),
+    [isFirebaseVerified, firestoreAdminReports, localReports]
+  );
 
   // Bottom Navigation tabs: 'feed' | 'flash' | 'chats' | 'profile'
   const [currentNavTab, setCurrentNavTab] = useState<AppNavTab>('feed');
@@ -341,7 +393,10 @@ export default function App() {
     post?: PostItem | null;
   } | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
+  const [editingPost, setEditingPost] = useState<PostItem | null>(null);
+  const [pendingDeletePost, setPendingDeletePost] = useState<PostItem | null>(null);
   const [isTranscriptModalOpen, setIsTranscriptModalOpen] = useState<boolean>(false);
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Firebase Auth observer
@@ -354,7 +409,7 @@ export default function App() {
       }
 
       const email = fbUser.email?.trim() || '';
-      if (!email.toLowerCase().endsWith('@g.nccu.edu.tw')) {
+      if (!isAllowedNccuEmail(email)) {
         await signOut(auth);
         setFirebaseUser(null);
         setUserDocExists(false);
@@ -378,6 +433,10 @@ export default function App() {
         if (userSnap.exists()) {
           setUserDocExists(true);
           const u = userSnap.data();
+          const bioSex: BiologicalSex | undefined =
+            u.biologicalSex === 'female' || u.biologicalSex === 'male'
+              ? u.biologicalSex
+              : undefined;
           setCurrentUser((prev) => ({
             ...prev,
             id: fbUser.uid,
@@ -386,11 +445,12 @@ export default function App() {
             name: String(u.nickname || prev.name),
             nickname: String(u.nickname || prev.nickname),
             realName: u.realName ? String(u.realName) : prev.realName || String(u.nickname || prev.name),
+            biologicalSex: bioSex || prev.biologicalSex || 'female',
             department: String(u.department || prev.department),
             year: String(u.year || prev.year),
             dormLocation: String(u.dormLocation || prev.dormLocation),
             bio: u.bio !== undefined ? String(u.bio) : prev.bio,
-            gender: (u.gender as UserProfile['gender']) || prev.gender,
+            gender: (u.gender as UserProfile['gender']) || bioSex || prev.gender,
             zone: (u.zone as CampusZone) || prev.zone,
             canTutorSubjects: Array.isArray(u.canTutorSubjects)
               ? u.canTutorSubjects.map(String)
@@ -545,12 +605,13 @@ export default function App() {
     };
   }, [isFirebaseVerified, firebaseUser]);
 
-  // Real-time Firestore listeners for `reviews` and `reports` (for live trustScore + Profile reviews)
+  // Real-time Firestore listeners for `reviews` and `reports`
   useEffect(() => {
     if (!isFirebaseVerified || !firebaseUser) {
       setFirestoreReceivedReviews([]);
       setFirestoreGivenReviews([]);
       setFirestoreReportsAgainstMe([]);
+      setFirestoreAdminReports([]);
       setReviewsReady(false);
       setReportsReady(false);
       return;
@@ -603,21 +664,9 @@ export default function App() {
     const unsubReports = onSnapshot(
       qReportsAgainstMe,
       (snapshot) => {
-        const list: ReportItem[] = snapshot.docs.map((docSnap) => {
-          const d = docSnap.data();
-          const createdTs = d.createdAt?.toDate ? (d.createdAt.toDate() as Date) : null;
-          return {
-            id: docSnap.id,
-            orderId: d.orderId ? String(d.orderId) : undefined,
-            taskId: String(d.taskId || ''),
-            reporterId: String(d.reporterUid || ''),
-            reportedUserId: d.reportedUid ? String(d.reportedUid) : undefined,
-            reasonCategory: (d.reasonCategory as DisputeCategory) || 'other',
-            description: String(d.description || ''),
-            status: (d.status as ReportItem['status']) || 'submitted',
-            createdAt: createdTs ? createdTs.toLocaleDateString('zh-TW') : '剛剛',
-          };
-        });
+        const list = snapshot.docs
+          .map(mapReportDocToReportItem)
+          .sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0));
         setFirestoreReportsAgainstMe(list);
         setReportsReady(true);
       },
@@ -626,14 +675,33 @@ export default function App() {
       }
     );
 
+    let unsubAdminReports: (() => void) | null = null;
+    if (isAdminEmail(firebaseUser.email)) {
+      unsubAdminReports = onSnapshot(
+        collection(db, 'reports'),
+        (snapshot) => {
+          const list = snapshot.docs
+            .map(mapReportDocToReportItem)
+            .sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0));
+          setFirestoreAdminReports(list);
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'reports');
+        }
+      );
+    } else {
+      setFirestoreAdminReports([]);
+    }
+
     return () => {
       unsubReceived();
       unsubGiven();
       unsubReports();
+      unsubAdminReports?.();
     };
   }, [isFirebaseVerified, firebaseUser]);
 
-  // Deterministic live calculation of `helpCount` (24h per-peer deduplication) & `trustScore` (base 90, clamped 0..100)
+  // Deterministic live calculation of `helpCount` & `trustScore` (base 90, only confirmed_violation deducts 10)
   const { computedHelpCount, computedTrustScore } = useMemo(() => {
     const completedOrders = orders
       .filter(
@@ -669,7 +737,38 @@ export default function App() {
     return { computedHelpCount: helpTotal, computedTrustScore: score };
   }, [orders, receivedReviews, reportsAgainstMe, currentUser.id]);
 
-  // Sync computed trustScore & helpCount back to currentUser and Firestore `users/{uid}`
+  // Helper to sync non-PII `public_profiles/{uid}`
+  const syncPublicProfileToFirestore = async (
+    uid: string,
+    profile: UserProfile,
+    trustScore: number,
+    helpCount: number
+  ) => {
+    const pubPayload: Record<string, unknown> = {
+      uid,
+      nickname: (profile.nickname || profile.name).slice(0, 64),
+      department: (profile.department || '').slice(0, 64),
+      year: (profile.year || '').slice(0, 32),
+      dormLocation: (profile.dormLocation || '').slice(0, 64),
+      bio: (profile.bio || '').slice(0, 300),
+      zone: profile.zone || 'downhill',
+      canTutorSubjects: (profile.canTutorSubjects || []).slice(0, 30),
+      trustScore,
+      helpCount,
+      updatedAt: serverTimestamp(),
+    };
+    if (profile.biologicalSex === 'female' || profile.biologicalSex === 'male') {
+      pubPayload.biologicalSex = profile.biologicalSex;
+    }
+
+    try {
+      await setDoc(doc(db, 'public_profiles', uid), pubPayload);
+    } catch {
+      // keep silent if user doc isn't initialized yet
+    }
+  };
+
+  // Sync computed trustScore & helpCount back to currentUser, `users/{uid}`, and `public_profiles/{uid}`
   useEffect(() => {
     if (!isOnboarded) return;
     if (isFirebaseVerified && (!ordersReady || !reviewsReady || !reportsReady || !userDocExists)) {
@@ -683,12 +782,13 @@ export default function App() {
       return;
     }
 
-    setCurrentUser((prev) => ({
-      ...prev,
+    const updatedProfile: UserProfile = {
+      ...currentUser,
       trustScore: computedTrustScore,
       helpCount: computedHelpCount,
       completedTasks: computedHelpCount,
-    }));
+    };
+    setCurrentUser(updatedProfile);
 
     if (isFirebaseVerified && firebaseUser && userDocExists) {
       void updateDoc(doc(db, 'users', firebaseUser.uid), {
@@ -699,6 +799,12 @@ export default function App() {
       }).catch((err) => {
         handleFirestoreError(err, OperationType.UPDATE, `users/${firebaseUser.uid}`);
       });
+      void syncPublicProfileToFirestore(
+        firebaseUser.uid,
+        updatedProfile,
+        computedTrustScore,
+        computedHelpCount
+      );
     }
   }, [
     isOnboarded,
@@ -710,8 +816,7 @@ export default function App() {
     reportsReady,
     computedTrustScore,
     computedHelpCount,
-    currentUser.trustScore,
-    currentUser.helpCount,
+    currentUser,
   ]);
 
   // Persist lightweight local cache
@@ -788,15 +893,19 @@ export default function App() {
     setLang((prev) => (prev === 'zh' ? 'en' : 'zh'));
   };
 
-  // Sync verified NCCU user profile to Firestore (`nickname` + `realName` dual track, baseline trustScore=90, helpCount=0)
+  // Sync verified NCCU user profile to Firestore (`users` + `public_profiles`)
   const syncUserToFirestore = async (profile: UserProfile) => {
     const fbUser = auth.currentUser;
-    if (!fbUser || !fbUser.email?.toLowerCase().endsWith('@g.nccu.edu.tw')) return;
+    if (!fbUser || !isAllowedNccuEmail(fbUser.email)) return;
 
     const userPath = `users/${fbUser.uid}`;
     const userRef = doc(db, 'users', fbUser.uid);
     const nick = (profile.nickname || profile.name).slice(0, 64);
     const real = (profile.realName || nick).slice(0, 64);
+    const bioSex: BiologicalSex =
+      profile.biologicalSex === 'male' || profile.biologicalSex === 'female'
+        ? profile.biologicalSex
+        : 'female';
 
     try {
       const existingSnap = await getDoc(userRef);
@@ -804,11 +913,12 @@ export default function App() {
         await updateDoc(userRef, {
           nickname: nick,
           realName: real,
+          biologicalSex: bioSex,
           department: (profile.department || '').slice(0, 64),
           year: (profile.year || '').slice(0, 32),
           dormLocation: (profile.dormLocation || '').slice(0, 64),
           bio: (profile.bio || '').slice(0, 300),
-          gender: profile.gender || 'undisclosed',
+          gender: bioSex,
           zone: profile.zone || 'downhill',
           canTutorSubjects: (profile.canTutorSubjects || []).slice(0, 30),
           subscribedTags: (profile.subscribedTags || []).slice(0, 30),
@@ -819,14 +929,15 @@ export default function App() {
         await setDoc(userRef, {
           uid: fbUser.uid,
           nccuEmail: fbUser.email,
-          studentId: (profile.studentId || fbUser.email.split('@')[0]).slice(0, 64),
+          studentId: (profile.studentId || (fbUser.email || '').split('@')[0]).slice(0, 64),
           nickname: nick,
           realName: real,
+          biologicalSex: bioSex,
           department: (profile.department || '').slice(0, 64),
           year: (profile.year || '').slice(0, 32),
           dormLocation: (profile.dormLocation || '').slice(0, 64),
           bio: (profile.bio || '').slice(0, 300),
-          gender: profile.gender || 'undisclosed',
+          gender: bioSex,
           zone: profile.zone || 'downhill',
           canTutorSubjects: (profile.canTutorSubjects || []).slice(0, 30),
           subscribedTags: (profile.subscribedTags || []).slice(0, 30),
@@ -838,6 +949,13 @@ export default function App() {
         });
         setUserDocExists(true);
       }
+
+      await syncPublicProfileToFirestore(
+        fbUser.uid,
+        { ...profile, biologicalSex: bioSex },
+        profile.trustScore ?? 90,
+        profile.helpCount ?? 0
+      );
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, userPath);
     }
@@ -863,6 +981,13 @@ export default function App() {
     const qty = Math.max(1, Math.min(20, newPostData.remainingQuota ?? 1));
     const totalQty = Math.max(qty, Math.min(20, newPostData.totalQuota ?? qty));
 
+    const isFemaleDormTask = Boolean(
+      newPostData.isFemaleDormOnly || isFemaleDormLocationName(location)
+    );
+    const isAnonymous = isFemaleDormTask ? false : Boolean(newPostData.isCreatorAnonymous);
+    const myNick = (currentUser.nickname || currentUser.name).slice(0, 64);
+    const myReal = (currentUser.realName || myNick).slice(0, 64);
+
     if (isFirebaseVerified && firebaseUser) {
       const payload: Record<string, unknown> = {
         title,
@@ -878,11 +1003,12 @@ export default function App() {
         quantity: qty,
         remainingQuantity: qty,
         totalQuota: totalQty,
-        isAnonymous: Boolean(newPostData.isCreatorAnonymous),
-        femaleOnlyRecommended: Boolean(newPostData.femaleOnlyRecommended),
+        isAnonymous,
+        isFemaleDormOnly: isFemaleDormTask,
+        femaleOnlyRecommended: isFemaleDormTask || Boolean(newPostData.femaleOnlyRecommended),
         tags: (newPostData.tags || ['#政大互助']).slice(0, 10),
         creatorUid: firebaseUser.uid,
-        creatorName: (currentUser.nickname || currentUser.name).slice(0, 64),
+        creatorName: myNick,
         creatorEmail: firebaseUser.email || currentUser.nccuEmail,
         creatorTrustScore: currentUser.trustScore,
         status: 'open',
@@ -893,6 +1019,9 @@ export default function App() {
         updatedAt: serverTimestamp(),
       };
 
+      if (isFemaleDormTask) {
+        payload.creatorRealName = myReal;
+      }
       if (newPostData.titleEn) payload.titleEn = newPostData.titleEn.slice(0, 160);
       if (newPostData.descriptionEn) payload.descriptionEn = newPostData.descriptionEn.slice(0, 2000);
       if (price > 0 && newPostData.paymentNote?.trim()) {
@@ -920,11 +1049,13 @@ export default function App() {
     const newPost: PostItem = {
       id: newId,
       creatorId: currentUser.id,
-      creatorName: currentUser.nickname || currentUser.name,
+      creatorName: myNick,
+      creatorRealName: isFemaleDormTask ? myReal : undefined,
       creatorGender: currentUser.gender,
       creatorTrustScore: currentUser.trustScore,
-      isCreatorAnonymous: Boolean(newPostData.isCreatorAnonymous),
-      creatorAnonAlias: newPostData.isCreatorAnonymous ? '匿名同學' : undefined,
+      isCreatorAnonymous: isAnonymous,
+      creatorAnonAlias: isAnonymous ? '匿名同學' : undefined,
+      isFemaleDormOnly: isFemaleDormTask,
       category: newPostData.category || 'marketplace',
       subcategory: newPostData.subcategory,
       title,
@@ -950,10 +1081,10 @@ export default function App() {
       timeRemainingText: formatRemainingMinutes(mins, lang),
       status: 'open',
       locationName: location,
-      locationNameEn: newPostData.locationNameEn || location,
+      locationNameEn: localizeLocationName(location, 'en', newPostData.locationNameEn),
       locationCoordinates: newPostData.locationCoordinates || { lat: 24.9866, lng: 121.5766 },
       locationZone: newPostData.locationZone || currentZone,
-      femaleOnlyRecommended: Boolean(newPostData.femaleOnlyRecommended),
+      femaleOnlyRecommended: isFemaleDormTask || Boolean(newPostData.femaleOnlyRecommended),
       minTrustScoreRequired: 60,
       createdAt: '剛剛',
       expiresAt: formatRemainingMinutes(mins, lang),
@@ -968,7 +1099,177 @@ export default function App() {
     );
   };
 
-  // Claim / Apply for Post: Decrement parent `remainingQuantity` (keep `open` until 0), create independent child `Order`
+  // Helper: check if a task has active (non-cancelled, non-completed) orders
+  const hasActiveOrdersForPost = (postId: string): boolean => {
+    return orders.some(
+      (o) => o.taskId === postId && o.status !== 'cancelled' && o.status !== 'completed'
+    );
+  };
+
+  // Edit existing task
+  const handleUpdatePost = async (postId: string, updates: Partial<PostItem>) => {
+    const existingPost = posts.find((p) => p.id === postId);
+    if (!existingPost) return;
+    const hasActive = hasActiveOrdersForPost(postId);
+
+    if (hasActive) {
+      const cleanDesc = (updates.description || existingPost.description).trim().slice(0, 2000);
+      if (isFirebaseVerified && firebaseUser) {
+        try {
+          await updateDoc(doc(db, 'tasks', postId), {
+            description: cleanDesc,
+            updatedAt: serverTimestamp(),
+          });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.UPDATE, `tasks/${postId}`);
+          return;
+        }
+      } else {
+        setLocalPosts((prev) =>
+          prev.map((p) => (p.id === postId ? { ...p, description: cleanDesc } : p))
+        );
+      }
+      showToast(
+        lang === 'zh' ? '✅ 已更新補充說明！' : '✅ Additional description updated!'
+      );
+      return;
+    }
+
+    const title = (updates.title || existingPost.title).trim().slice(0, 160);
+    const description = (updates.description || existingPost.description).trim().slice(0, 2000);
+    const location = (updates.locationName || existingPost.locationName).trim().slice(0, 100);
+    const price =
+      updates.rewardAmount !== undefined ? Number(updates.rewardAmount) : existingPost.rewardAmount;
+    const paymentMethod = normalizeFirestorePaymentMethod(
+      price === 0 ? 'free_aid' : updates.paymentMethod || existingPost.paymentMethod
+    );
+    const paymentDirection = normalizePaymentDirection(
+      price,
+      updates.paymentDirection || existingPost.paymentDirection,
+      updates.payerRole || existingPost.payerRole
+    );
+    const isFemaleDormTask = Boolean(
+      updates.isFemaleDormOnly ?? (existingPost.isFemaleDormOnly || isFemaleDormLocationName(location))
+    );
+    const isAnonymous = isFemaleDormTask
+      ? false
+      : Boolean(updates.isCreatorAnonymous ?? existingPost.isCreatorAnonymous);
+    const mins =
+      updates.remainingMinutes !== undefined
+        ? updates.remainingMinutes
+        : existingPost.remainingMinutes ?? 120;
+    const expireAtMs = updates.expireAtMs ?? existingPost.expireAtMs ?? Date.now() + mins * 60000;
+
+    if (isFirebaseVerified && firebaseUser) {
+      const patch: Record<string, unknown> = {
+        title,
+        description,
+        location,
+        locationZone: updates.locationZone || existingPost.locationZone,
+        locationLat:
+          updates.locationCoordinates?.lat ?? existingPost.locationCoordinates.lat ?? 24.9866,
+        locationLng:
+          updates.locationCoordinates?.lng ?? existingPost.locationCoordinates.lng ?? 121.5766,
+        price,
+        paymentMethod,
+        paymentDirection,
+        isFemaleDormOnly: isFemaleDormTask,
+        femaleOnlyRecommended: isFemaleDormTask || Boolean(updates.femaleOnlyRecommended),
+        isAnonymous,
+        tags: (updates.tags || existingPost.tags).slice(0, 10),
+        timeOption: updates.timeOption || existingPost.timeOption,
+        remainingMinutes: mins,
+        expireAt: expireAtMs,
+        updatedAt: serverTimestamp(),
+      };
+      if (price > 0 && updates.paymentNote?.trim()) {
+        patch.paymentNote = updates.paymentNote.trim().slice(0, 200);
+      }
+      if (price > 0 && paymentDirection !== 'free') {
+        patch.payerRole = paymentDirection === 'creator_pays' ? 'creator' : 'fulfiller';
+      }
+
+      try {
+        await updateDoc(doc(db, 'tasks', postId), patch);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `tasks/${postId}`);
+        return;
+      }
+    } else {
+      setLocalPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId
+            ? {
+                ...p,
+                ...updates,
+                title,
+                description,
+                locationName: location,
+                locationNameEn: localizeLocationName(location, 'en'),
+                rewardAmount: price,
+                escrowDeposit: price,
+                paymentMethod,
+                paymentDirection,
+                isFemaleDormOnly: isFemaleDormTask,
+                isCreatorAnonymous: isAnonymous,
+                remainingMinutes: mins,
+                expireAtMs,
+                timeRemainingText: formatRemainingMinutes(mins, lang),
+                expiresAt: formatRemainingMinutes(mins, lang),
+              }
+            : p
+        )
+      );
+    }
+
+    showToast(lang === 'zh' ? '✅ 任務內容已更新！' : '✅ Task updated!');
+  };
+
+  // Delete existing task (triggered from in-app confirmation modal)
+  const handleRequestDeletePost = (post: PostItem) => {
+    if (hasActiveOrdersForPost(post.id)) {
+      showToast(
+        lang === 'zh'
+          ? '⚠️ 已有進行中或待審核的訂單，請先於聊天室處理完畢，不可直接刪除任務。'
+          : '⚠️ Cannot delete a task while active orders exist.'
+      );
+      return;
+    }
+    setPendingDeletePost(post);
+  };
+
+  const handleConfirmDeletePost = async () => {
+    if (!pendingDeletePost) return;
+    const target = pendingDeletePost;
+    setPendingDeletePost(null);
+
+    if (hasActiveOrdersForPost(target.id)) {
+      showToast(
+        lang === 'zh'
+          ? '⚠️ 已有進行中或待審核的訂單，不可刪除任務。'
+          : '⚠️ Cannot delete a task while active orders exist.'
+      );
+      return;
+    }
+
+    if (isFirebaseVerified && firebaseUser) {
+      try {
+        await deleteDoc(doc(db, 'tasks', target.id));
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, `tasks/${target.id}`);
+        return;
+      }
+    } else {
+      setLocalPosts((prev) => prev.filter((p) => p.id !== target.id));
+    }
+
+    if (selectedDetailPostId === target.id) {
+      setSelectedDetailPostId(null);
+    }
+    showToast(lang === 'zh' ? '🗑️ 已刪除任務！' : '🗑️ Task deleted!');
+  };
+
+  // Claim / Apply for Post: sets initial order status to `pending_approval`
   const handleApplyAcceptPost = async (
     postId: string
   ): Promise<{ success: boolean; message: string; order?: OrderItem }> => {
@@ -981,6 +1282,19 @@ export default function App() {
       return {
         success: false,
         message: lang === 'zh' ? '不能接自己發布的任務。' : 'Cannot claim your own task.',
+      };
+    }
+
+    const isFemaleDormTask = Boolean(
+      post.isFemaleDormOnly || isFemaleDormLocationName(post.locationName)
+    );
+    if (isFemaleDormTask && currentUser.biologicalSex !== 'female') {
+      return {
+        success: false,
+        message:
+          lang === 'zh'
+            ? '此為女宿專屬實名任務，僅限生理女性帳號接單。'
+            : 'Female dorm task: only biological female accounts can apply.',
       };
     }
 
@@ -1008,6 +1322,7 @@ export default function App() {
     }
 
     const myNick = (currentUser.nickname || currentUser.name).slice(0, 64);
+    const myReal = (currentUser.realName || myNick).slice(0, 64);
     const paymentMethod = normalizeFirestorePaymentMethod(
       post.rewardAmount === 0 ? 'free_aid' : post.paymentMethod
     );
@@ -1051,7 +1366,7 @@ export default function App() {
           tx.update(taskRef, taskUpdate);
         });
 
-        // 2. Create independent child Order (no realName stored until mutual consent)
+        // 2. Create independent child Order in `pending_approval`
         const orderPayload: Record<string, unknown> = {
           taskId: post.id,
           taskCategory: post.category,
@@ -1060,23 +1375,28 @@ export default function App() {
           taskPrice: post.rewardAmount,
           paymentMethod,
           paymentDirection,
+          isFemaleDormOnly: isFemaleDormTask,
           creatorUid: post.creatorId,
           creatorName: post.creatorName.slice(0, 64),
-          creatorAnonymous: Boolean(post.isCreatorAnonymous),
+          creatorAnonymous: isFemaleDormTask ? false : Boolean(post.isCreatorAnonymous),
           accepterUid: firebaseUser.uid,
           accepterName: myNick,
-          accepterAnonymous: true,
-          status: 'pending_confirm',
+          accepterAnonymous: isFemaleDormTask ? false : true,
+          status: 'pending_approval',
           creatorPaidConfirmed: false,
           accepterPaidConfirmed: false,
           creatorDoneConfirmed: false,
           accepterDoneConfirmed: false,
-          revealCreator: false,
-          revealAccepter: false,
+          revealCreator: isFemaleDormTask,
+          revealAccepter: isFemaleDormTask,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
 
+        if (isFemaleDormTask) {
+          orderPayload.creatorRealName = (post.creatorRealName || post.creatorName).slice(0, 64);
+          orderPayload.accepterRealName = myReal;
+        }
         if (post.titleEn) orderPayload.taskTitleEn = post.titleEn.slice(0, 160);
         if (post.locationNameEn) orderPayload.taskLocationEn = post.locationNameEn.slice(0, 100);
         if (post.paymentNote) orderPayload.paymentNote = post.paymentNote.slice(0, 200);
@@ -1089,10 +1409,9 @@ export default function App() {
 
         // 3. Initial claim message
         await addDoc(collection(db, 'orders', orderRef.id, 'messages'), {
-          text:
-            lang === 'zh'
-              ? '［接單通知］我已申請接單／領取名額，請雙方於此即時聊天室確認交付細節！'
-              : '[Claim] I claimed this task. Let us coordinate details here!',
+          text: isFemaleDormTask
+            ? '［接單通知］我已實名申請接單，請雙方確認資料後點擊確認接單！'
+            : '［接單通知］我已申請接單，請先於聊天室解除匿名並檢視資料後確認接單！',
           senderUid: firebaseUser.uid,
           senderName: myNick,
           createdAt: serverTimestamp(),
@@ -1117,19 +1436,22 @@ export default function App() {
                 ? 'fulfiller'
                 : undefined,
           taskExpireAt: post.expireAtMs,
+          isFemaleDormOnly: isFemaleDormTask,
           creatorUid: post.creatorId,
           creatorName: post.creatorName,
-          creatorAnonymous: Boolean(post.isCreatorAnonymous),
+          creatorRealName: isFemaleDormTask ? post.creatorRealName || post.creatorName : undefined,
+          creatorAnonymous: isFemaleDormTask ? false : Boolean(post.isCreatorAnonymous),
           accepterUid: firebaseUser.uid,
           accepterName: myNick,
-          accepterAnonymous: true,
-          status: 'pending_confirm',
+          accepterRealName: isFemaleDormTask ? myReal : undefined,
+          accepterAnonymous: isFemaleDormTask ? false : true,
+          status: 'pending_approval',
           creatorPaidConfirmed: false,
           accepterPaidConfirmed: false,
           creatorDoneConfirmed: false,
           accepterDoneConfirmed: false,
-          revealCreator: false,
-          revealAccepter: false,
+          revealCreator: isFemaleDormTask,
+          revealAccepter: isFemaleDormTask,
           createdAtMs: Date.now(),
           updatedAtMs: Date.now(),
         };
@@ -1137,13 +1459,9 @@ export default function App() {
         return {
           success: true,
           message:
-            (post.totalQuota ?? 1) > 1
-              ? lang === 'zh'
-                ? '✅ 已成功領取 1 份並建立 1-on-1 聊天室！'
-                : '✅ Spot claimed! 1-on-1 chat opened.'
-              : lang === 'zh'
-                ? '✅ 已申請接單並建立專屬 1-on-1 聊天室！'
-                : '✅ Claimed task! 1-on-1 chat opened.',
+            lang === 'zh'
+              ? '✅ 已送出接單申請並建立 1-on-1 聊天室！'
+              : '✅ Application sent & 1-on-1 chat opened!',
           order: createdOrder,
         };
       } catch (error) {
@@ -1196,19 +1514,22 @@ export default function App() {
             ? 'fulfiller'
             : undefined,
       taskExpireAt: post.expireAtMs,
+      isFemaleDormOnly: isFemaleDormTask,
       creatorUid: post.creatorId,
       creatorName: post.creatorName,
-      creatorAnonymous: Boolean(post.isCreatorAnonymous),
+      creatorRealName: isFemaleDormTask ? post.creatorRealName || post.creatorName : undefined,
+      creatorAnonymous: isFemaleDormTask ? false : Boolean(post.isCreatorAnonymous),
       accepterUid: currentUser.id,
       accepterName: myNick,
-      accepterAnonymous: true,
-      status: 'pending_confirm',
+      accepterRealName: isFemaleDormTask ? myReal : undefined,
+      accepterAnonymous: isFemaleDormTask ? false : true,
+      status: 'pending_approval',
       creatorPaidConfirmed: false,
       accepterPaidConfirmed: false,
       creatorDoneConfirmed: false,
       accepterDoneConfirmed: false,
-      revealCreator: false,
-      revealAccepter: false,
+      revealCreator: isFemaleDormTask,
+      revealAccepter: isFemaleDormTask,
       createdAtMs: Date.now(),
       updatedAtMs: Date.now(),
     };
@@ -1218,7 +1539,9 @@ export default function App() {
       [demoOrderId]: [
         {
           id: `msg_${Date.now()}`,
-          text: '［接單通知］我已申請接單／領取名額，請雙方於此即時聊天室確認交付細節！',
+          text: isFemaleDormTask
+            ? '［接單通知］我已實名申請接單，請雙方確認資料後點擊確認接單！'
+            : '［接單通知］我已申請接單，請先於聊天室解除匿名並檢視資料後確認接單！',
           senderUid: currentUser.id,
           senderName: myNick,
           createdAtMs: Date.now(),
@@ -1233,9 +1556,81 @@ export default function App() {
     return {
       success: true,
       message:
-        lang === 'zh' ? '✅ 已建立專屬 1-on-1 聊天室！' : '✅ 1-on-1 chat opened!',
+        lang === 'zh'
+          ? '✅ 已送出接單申請並建立專屬 1-on-1 聊天室！'
+          : '✅ Application sent & 1-on-1 chat opened!',
       order: demoOrder,
     };
+  };
+
+  // Creator declines applicant -> cancel order + restore +1 spot & reopen task
+  const handleDeclineOrder = async (order: OrderItem) => {
+    if (order.creatorUid !== currentUser.id) return;
+
+    if (isFirebaseVerified && firebaseUser) {
+      try {
+        await updateDoc(doc(db, 'orders', order.id), {
+          status: 'cancelled',
+          updatedAt: serverTimestamp(),
+        });
+
+        await addDoc(collection(db, 'orders', order.id, 'messages'), {
+          text: '［系統通知］發布者已婉拒此申請，任務名額已重新釋出。',
+          senderUid: firebaseUser.uid,
+          senderName: currentUser.nickname || currentUser.name,
+          createdAt: serverTimestamp(),
+        });
+
+        await runTransaction(db, async (tx) => {
+          const taskRef = doc(db, 'tasks', order.taskId);
+          const taskSnap = await tx.get(taskRef);
+          if (!taskSnap.exists()) return;
+          const d = taskSnap.data();
+          if (d.status === 'completed' || d.status === 'cancelled') return;
+          const maxQuota = typeof d.totalQuota === 'number' ? d.totalQuota : 20;
+          const curQty =
+            typeof d.remainingQuantity === 'number'
+              ? d.remainingQuantity
+              : typeof d.quantity === 'number'
+                ? d.quantity
+                : 0;
+          const nextQty = Math.min(maxQuota, curQty + 1);
+          tx.update(taskRef, {
+            quantity: nextQty,
+            remainingQuantity: nextQty,
+            status: d.status === 'closed' ? 'open' : d.status,
+            updatedAt: serverTimestamp(),
+          });
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `orders/${order.id}`);
+        return;
+      }
+    } else {
+      handleLocalUpdateOrder(order.id, { status: 'cancelled' });
+      handleLocalSendMessage(
+        order.id,
+        '［系統通知］發布者已婉拒此申請，任務名額已重新釋出。'
+      );
+      setLocalPosts((prev) =>
+        prev.map((p) => {
+          if (p.id !== order.taskId) return p;
+          const maxQ = p.totalQuota ?? 1;
+          const nextQ = Math.min(maxQ, (p.remainingQuota ?? 0) + 1);
+          return {
+            ...p,
+            remainingQuota: nextQ,
+            status: p.status === 'closed' ? 'open' : p.status,
+          };
+        })
+      );
+    }
+
+    showToast(
+      lang === 'zh'
+        ? '已婉拒此接單申請，任務名額已重新釋出至大廳。'
+        : 'Application declined and task spot released.'
+    );
   };
 
   // Dev demo fallback local message & order update
@@ -1334,41 +1729,55 @@ export default function App() {
     );
   };
 
-  // Structured Report & Dispute Submission (works from both Order Chats and Lobby Tasks)
+  // Structured Report Submission (always enters `pending_review`; NO unverified deduction)
   const handleSubmitReport = async ({
     order,
     post,
     category,
     description,
+    evidenceUrl,
   }: {
     order?: OrderItem | null;
     post?: PostItem | null;
     category: DisputeCategory;
     description: string;
+    evidenceUrl?: string;
   }) => {
     const cleanDesc = description.trim().slice(0, 1000) || '校園安全舉報提交';
     const taskId = order?.taskId || post?.id || '';
     if (!taskId) return;
 
+    const taskTitle = (order?.taskTitle || post?.title || '').slice(0, 160);
     const reportedUid = order
       ? order.creatorUid === currentUser.id
         ? order.accepterUid
         : order.creatorUid
       : post?.creatorId;
+    const reportedName = order
+      ? order.creatorUid === currentUser.id
+        ? order.accepterName
+        : order.creatorName
+      : post?.creatorName;
 
     if (isFirebaseVerified && firebaseUser) {
       try {
         const reportPayload: Record<string, unknown> = {
           taskId,
           reporterUid: firebaseUser.uid,
+          reporterEmail: (firebaseUser.email || currentUser.nccuEmail).slice(0, 128),
           reasonCategory: category,
           description: cleanDesc,
-          status: order ? 'frozen_escrow' : 'submitted',
+          status: 'pending_review',
           createdAt: serverTimestamp(),
         };
+        if (taskTitle) reportPayload.taskTitle = taskTitle;
         if (order?.id) reportPayload.orderId = order.id;
         if (reportedUid && /^[a-zA-Z0-9_\-]+$/.test(reportedUid)) {
           reportPayload.reportedUid = reportedUid;
+        }
+        if (reportedName) reportPayload.reportedName = reportedName.slice(0, 64);
+        if (evidenceUrl && evidenceUrl.length <= 250000) {
+          reportPayload.evidenceUrl = evidenceUrl;
         }
 
         await addDoc(collection(db, 'reports'), reportPayload);
@@ -1396,13 +1805,17 @@ export default function App() {
         id: `rep_${Date.now()}`,
         orderId: order?.id,
         taskId,
-        taskTitle: order?.taskTitle || post?.title,
+        taskTitle,
         reporterId: currentUser.id,
+        reporterEmail: currentUser.nccuEmail,
         reportedUserId: reportedUid,
+        reportedUserName: reportedName,
         reasonCategory: category,
         description: cleanDesc,
-        status: order ? 'frozen_escrow' : 'submitted',
+        evidenceUrl,
+        status: 'pending_review',
         createdAt: new Date().toLocaleDateString('zh-TW'),
+        createdAtMs: Date.now(),
       };
       setLocalReports((prev) => [localRep, ...prev]);
 
@@ -1418,12 +1831,91 @@ export default function App() {
 
     showToast(
       lang === 'zh'
-        ? '⚠️ 舉報紀錄已送出！系統已留存檢舉紀錄。'
-        : '⚠️ Report submitted and recorded.'
+        ? '⚠️ 舉報已送出並進入「待審核」，管理員將依截圖與對話紀錄裁決！'
+        : '⚠️ Report submitted for admin review!'
     );
   };
 
-  // Campus Location update from FeedView (GPS or manual zone fallback)
+  // Admin Console Decision Handler
+  const handleAdminDecideReport = async (
+    report: ReportItem,
+    decision: 'dismissed' | 'confirmed_violation',
+    aiSummary: string,
+    adminNote: string
+  ) => {
+    if (!isAdminUser) return;
+
+    if (isFirebaseVerified && firebaseUser) {
+      try {
+        await updateDoc(doc(db, 'reports', report.id), {
+          status: decision,
+          aiSummary: aiSummary.slice(0, 1000),
+          adminNote: adminNote.slice(0, 500),
+          reviewedBy: (firebaseUser.email || currentUser.nccuEmail).slice(0, 128),
+          reviewedAtMs: Date.now(),
+        });
+
+        if (
+          decision === 'confirmed_violation' &&
+          report.reportedUserId &&
+          /^[a-zA-Z0-9_\-]+$/.test(report.reportedUserId)
+        ) {
+          const targetUserRef = doc(db, 'users', report.reportedUserId);
+          const targetSnap = await getDoc(targetUserRef).catch(() => null);
+          if (targetSnap && targetSnap.exists()) {
+            const currentScore =
+              typeof targetSnap.data().trustScore === 'number'
+                ? targetSnap.data().trustScore
+                : 90;
+            const nextScore = Math.max(0, currentScore - 10);
+            await updateDoc(targetUserRef, {
+              trustScore: nextScore,
+              updatedAt: serverTimestamp(),
+            }).catch(() => undefined);
+
+            const pubRef = doc(db, 'public_profiles', report.reportedUserId);
+            const pubSnap = await getDoc(pubRef).catch(() => null);
+            if (pubSnap && pubSnap.exists()) {
+              await updateDoc(pubRef, {
+                trustScore: nextScore,
+                updatedAt: serverTimestamp(),
+              }).catch(() => undefined);
+            }
+          }
+        }
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `reports/${report.id}`);
+        return;
+      }
+    } else {
+      setLocalReports((prev) =>
+        prev.map((r) =>
+          r.id === report.id
+            ? {
+                ...r,
+                status: decision,
+                aiSummary,
+                adminNote,
+                reviewedBy: currentUser.nccuEmail,
+                reviewedAtMs: Date.now(),
+              }
+            : r
+        )
+      );
+    }
+
+    showToast(
+      decision === 'confirmed_violation'
+        ? lang === 'zh'
+          ? '✅ 已確認違規並扣除被檢舉者 10 分信任指數。'
+          : '✅ Violation confirmed (-10 trust pts).'
+        : lang === 'zh'
+          ? '✅ 已駁回該筆檢舉（不扣分）。'
+          : '✅ Report dismissed.'
+    );
+  };
+
+  // Campus Location update from FeedView
   const handleUpdateLocation = (coords: Coordinates, areaLabel: string, zone: CampusZone) => {
     setCurrentZone(zone);
     setCurrentUser((prev) => ({
@@ -1630,7 +2122,7 @@ export default function App() {
     showToast(lang === 'zh' ? `已移除追蹤標籤 ${tag}` : `Unfollowed ${tag}`);
   };
 
-  // Transcript verification success (adds verified subject tag)
+  // Transcript verification success
   const handleTranscriptVerifiedSuccess = (_subjectCode: string, subjectName: string) => {
     const nextSubjects = currentUser.canTutorSubjects.includes(subjectName)
       ? currentUser.canTutorSubjects
@@ -1699,8 +2191,14 @@ export default function App() {
 
   const myPosts = posts.filter((p) => p.creatorId === currentUser.id);
 
-  // Flash / Urgent active count
+  // Flash / Urgent active count (respects female-dorm isolation)
   const flashCount = posts.filter((p) => {
+    const isFemaleDormTask = Boolean(
+      p.isFemaleDormOnly || isFemaleDormLocationName(p.locationName)
+    );
+    if (isFemaleDormTask && currentUser.biologicalSex !== 'female' && p.creatorId !== currentUser.id) {
+      return false;
+    }
     const isDelisted =
       p.status === 'expired' ||
       p.status === 'completed' ||
@@ -1717,6 +2215,13 @@ export default function App() {
       (o.creatorUid === currentUser.id || o.accepterUid === currentUser.id) &&
       o.status !== 'completed' &&
       o.status !== 'cancelled'
+  ).length;
+
+  const pendingReportsCount = adminReports.filter(
+    (r) =>
+      r.status === 'pending_review' ||
+      r.status === 'submitted' ||
+      r.status === 'frozen_escrow'
   ).length;
 
   // Mandatory Onboarding Gate
@@ -1736,6 +2241,10 @@ export default function App() {
             const updatedReal = profileData.realName || updatedNick;
             const fbUid = auth.currentUser?.uid;
             const fbEmail = auth.currentUser?.email || profileData.nccuEmail;
+            const bioSex: BiologicalSex =
+              profileData.biologicalSex === 'male' || profileData.biologicalSex === 'female'
+                ? profileData.biologicalSex
+                : 'female';
             const nextUser: UserProfile = {
               ...baseUser,
               ...profileData,
@@ -1744,6 +2253,8 @@ export default function App() {
               name: updatedNick,
               nickname: updatedNick,
               realName: updatedReal,
+              biologicalSex: bioSex,
+              gender: bioSex,
               trustScore: 90,
               helpCount: 0,
               completedTasks: 0,
@@ -1789,9 +2300,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Main App Header */}
+      {/* Minimalist Top App Header */}
       <AppHeader
-        currentUser={currentUser}
         currentZone={currentZone}
         onZoneChange={(zone) => {
           setCurrentZone(zone);
@@ -1801,8 +2311,6 @@ export default function App() {
               : `Switched to: ${zone === 'downhill' ? 'Downhill Campus' : 'Uphill Campus'}`
           );
         }}
-        onOpenCreatePost={() => setIsCreateModalOpen(true)}
-        onOpenProfile={() => setCurrentNavTab('profile')}
         lang={lang}
         onToggleLang={handleToggleLang}
       />
@@ -1814,7 +2322,10 @@ export default function App() {
             posts={posts}
             currentUser={currentUser}
             onSelectPost={(post) => setSelectedDetailPostId(post.id)}
-            onOpenCreatePost={() => setIsCreateModalOpen(true)}
+            onOpenCreatePost={() => {
+              setEditingPost(null);
+              setIsCreateModalOpen(true);
+            }}
             onOpenOnboarding={() => setCurrentNavTab('profile')}
             onUpdateLocation={handleUpdateLocation}
             mode="feed"
@@ -1827,7 +2338,10 @@ export default function App() {
             posts={posts}
             currentUser={currentUser}
             onSelectPost={(post) => setSelectedDetailPostId(post.id)}
-            onOpenCreatePost={() => setIsCreateModalOpen(true)}
+            onOpenCreatePost={() => {
+              setEditingPost(null);
+              setIsCreateModalOpen(true);
+            }}
             onOpenOnboarding={() => setCurrentNavTab('profile')}
             onUpdateLocation={handleUpdateLocation}
             mode="flash"
@@ -1849,6 +2363,9 @@ export default function App() {
             currentUser={currentUser}
             myPosts={myPosts}
             receivedReviews={receivedReviews}
+            isAdmin={isAdminUser}
+            pendingReportsCount={pendingReportsCount}
+            onOpenAdminReview={() => setIsAdminModalOpen(true)}
             onUpdateProfile={handleUpdateProfile}
             onAddTutorSkill={handleAddTutorSkill}
             onRemoveTutorSkill={handleRemoveTutorSkill}
@@ -1864,6 +2381,11 @@ export default function App() {
               void handleRepublishPost(id);
             }}
             onSelectPost={(post) => setSelectedDetailPostId(post.id)}
+            onEditPost={(post) => {
+              setEditingPost(post);
+              setIsCreateModalOpen(true);
+            }}
+            onDeletePost={handleRequestDeletePost}
             onOpenTranscriptVerify={() => setIsTranscriptModalOpen(true)}
             onLogout={handleLogout}
             lang={lang}
@@ -1876,12 +2398,16 @@ export default function App() {
         activeTab={currentNavTab}
         onChangeTab={(tab) => {
           if (tab === 'post') {
+            setEditingPost(null);
             setIsCreateModalOpen(true);
           } else {
             setCurrentNavTab(tab);
           }
         }}
-        onOpenCreatePost={() => setIsCreateModalOpen(true)}
+        onOpenCreatePost={() => {
+          setEditingPost(null);
+          setIsCreateModalOpen(true);
+        }}
         activeChatsCount={activeChatsCount}
         flashCount={flashCount}
         lang={lang}
@@ -1906,6 +2432,11 @@ export default function App() {
           onReportPost={(post) => {
             setActiveDisputeTarget({ post });
           }}
+          onEditPost={(post) => {
+            setEditingPost(post);
+            setIsCreateModalOpen(true);
+          }}
+          onDeletePost={handleRequestDeletePost}
           lang={lang}
         />
       )}
@@ -1920,8 +2451,10 @@ export default function App() {
           useFirestoreRealtime={isFirebaseVerified}
           existingReview={existingReviewForActiveOrder}
           localMessages={localOrderMessagesMap[activeChatOrder.id] || []}
+          localReviews={isFirebaseVerified ? [] : localReviews}
           onLocalSendMessage={handleLocalSendMessage}
           onLocalUpdateOrder={handleLocalUpdateOrder}
+          onDeclineOrder={handleDeclineOrder}
           onSubmitReview={handleSubmitReview}
           onOpenDispute={(ord) => {
             setActiveChatOrderId(null);
@@ -1945,16 +2478,76 @@ export default function App() {
         />
       )}
 
-      {/* Task Create Modal */}
+      {/* Task Create / Edit Modal */}
       <PostCreateModal
         isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
+        onClose={() => {
+          setIsCreateModalOpen(false);
+          setEditingPost(null);
+        }}
         currentUser={currentUser}
+        editingPost={editingPost}
+        hasActiveOrders={editingPost ? hasActiveOrdersForPost(editingPost.id) : false}
         onCreatePost={(data) => {
           void handleCreatePost(data);
         }}
+        onUpdatePost={handleUpdatePost}
         lang={lang}
       />
+
+      {/* In-App Task Delete Confirmation Dialog */}
+      {pendingDeletePost && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/65 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-sm w-full border border-slate-200 shadow-2xl p-5 space-y-4 text-xs">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-rose-600" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-slate-900">
+                  {lang === 'zh' ? '確認刪除此任務？' : 'Delete This Task?'}
+                </h3>
+                <p className="text-slate-600 leading-relaxed">
+                  {lang === 'zh'
+                    ? `確定要刪除「${pendingDeletePost.title}」嗎？刪除後將從大廳下架且無法復原。`
+                    : `Delete "${pendingDeletePost.title}"? This action removes it from the campus feed permanently.`}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setPendingDeletePost(null)}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
+              >
+                {lang === 'zh' ? '取消' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmDeletePost()}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold flex items-center gap-1 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{lang === 'zh' ? '確認刪除' : 'Delete'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Report Review Console Modal */}
+      {isAdminUser && (
+        <AdminReviewModal
+          isOpen={isAdminModalOpen}
+          onClose={() => setIsAdminModalOpen(false)}
+          reports={adminReports}
+          useFirestoreRealtime={isFirebaseVerified}
+          localOrderMessagesMap={localOrderMessagesMap}
+          onDecideReport={handleAdminDecideReport}
+          lang={lang}
+        />
+      )}
 
       {/* Transcript Verification Modal */}
       <TranscriptVerifyModal

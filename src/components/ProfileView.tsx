@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
-import { UserProfile, Language, PostItem, CampusZone, ReviewItem } from '../types';
+import {
+  UserProfile,
+  Language,
+  PostItem,
+  CampusZone,
+  ReviewItem,
+  BiologicalSex,
+} from '../types';
 import { formatRemainingMinutes, formatPaymentMethodLabel } from '../utils/formatters';
+import { localizeLocationName } from '../utils/lbs';
 import {
   ShieldCheck,
   GraduationCap,
@@ -13,16 +21,21 @@ import {
   RotateCcw,
   ClipboardList,
   Pencil,
+  Trash2,
   X,
   Check,
   Upload,
   Star,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface ProfileViewProps {
   currentUser: UserProfile;
   myPosts: PostItem[];
   receivedReviews: ReviewItem[];
+  isAdmin?: boolean;
+  pendingReportsCount?: number;
+  onOpenAdminReview?: () => void;
   onUpdateProfile: (updates: Partial<UserProfile>) => void;
   onAddTutorSkill: (skill: string) => void;
   onRemoveTutorSkill: (skill: string) => void;
@@ -32,6 +45,8 @@ interface ProfileViewProps {
   onExtendTime: (postId: string, minutes: number) => void;
   onRepublishPost: (postId: string) => void;
   onSelectPost: (post: PostItem) => void;
+  onEditPost: (post: PostItem) => void;
+  onDeletePost: (post: PostItem) => void;
   onOpenTranscriptVerify: () => void;
   onLogout: () => void;
   lang: Language;
@@ -43,6 +58,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   currentUser,
   myPosts,
   receivedReviews,
+  isAdmin = false,
+  pendingReportsCount = 0,
+  onOpenAdminReview,
   onUpdateProfile,
   onAddTutorSkill,
   onRemoveTutorSkill,
@@ -52,6 +70,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onExtendTime,
   onRepublishPost,
   onSelectPost,
+  onEditPost,
+  onDeletePost,
   onOpenTranscriptVerify,
   onLogout,
   lang,
@@ -59,6 +79,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [isEditingProfile, setIsEditingProfile] = useState<boolean>(false);
   const [editNickname, setEditNickname] = useState<string>(currentUser.nickname || currentUser.name);
   const [editRealName, setEditRealName] = useState<string>(currentUser.realName || '');
+  const [editBiologicalSex, setEditBiologicalSex] = useState<BiologicalSex>(
+    currentUser.biologicalSex || 'female'
+  );
   const [editDepartment, setEditDepartment] = useState<string>(currentUser.department);
   const [editYear, setEditYear] = useState<string>(currentUser.year);
   const [editDormLocation, setEditDormLocation] = useState<string>(currentUser.dormLocation);
@@ -71,6 +94,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const handleOpenEdit = () => {
     setEditNickname(currentUser.nickname || currentUser.name);
     setEditRealName(currentUser.realName || '');
+    setEditBiologicalSex(currentUser.biologicalSex || 'female');
     setEditDepartment(currentUser.department);
     setEditYear(currentUser.year);
     setEditDormLocation(currentUser.dormLocation);
@@ -87,6 +111,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       nickname: cleanNick,
       realName: cleanReal,
       name: cleanNick,
+      biologicalSex: editBiologicalSex,
+      gender: editBiologicalSex,
       department: editDepartment.trim() || '未填寫系別',
       year: editYear.trim() || '政大學生',
       dormLocation: editDormLocation.trim() || '山下校區',
@@ -114,7 +140,40 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   return (
     <div className="space-y-4 pb-24 text-xs">
-      {/* Student Profile Card (Nickname + Real Name Dual-Track) */}
+      {/* Admin Console Entry (ONLY visible for whitelisted Admin emails) */}
+      {isAdmin && onOpenAdminReview && (
+        <div className="bg-slate-900 text-white rounded-2xl p-4 shadow-xs flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center shrink-0">
+              <ShieldAlert className="w-4 h-4 text-amber-300" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-sm font-bold flex items-center gap-2">
+                <span>{lang === 'zh' ? '🛡️ 案件審核後台' : '🛡️ Admin Review Console'}</span>
+                {pendingReportsCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-mono font-bold">
+                    {pendingReportsCount} {lang === 'zh' ? '件待審' : 'pending'}
+                  </span>
+                )}
+              </h3>
+              <p className="text-[11px] text-slate-300 truncate">
+                {lang === 'zh'
+                  ? '審核檢舉佐證截圖、聊天紀錄與 AI 違規風險評估'
+                  : 'Review evidence screenshots, chat logs & AI risk summaries'}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenAdminReview}
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs cursor-pointer shrink-0 transition-colors"
+          >
+            {lang === 'zh' ? '進入審核' : 'Open'}
+          </button>
+        </div>
+      )}
+
+      {/* Student Profile Card (Nickname + Real Name Dual-Track + Biological Sex) */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-2xs space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
@@ -129,16 +188,34 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   {currentUser.nickname || currentUser.name}
                 </h2>
                 <span className="font-mono text-slate-400 text-[11px]">{currentUser.studentId}</span>
+                {currentUser.biologicalSex && (
+                  <span
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                      currentUser.biologicalSex === 'female'
+                        ? 'bg-rose-50 text-rose-800 border border-rose-200'
+                        : 'bg-sky-50 text-sky-800 border border-sky-200'
+                    }`}
+                  >
+                    {currentUser.biologicalSex === 'female'
+                      ? lang === 'zh'
+                        ? '生理女'
+                        : 'Female'
+                      : lang === 'zh'
+                        ? '生理男'
+                        : 'Male'}
+                  </span>
+                )}
               </div>
               {currentUser.realName && (
                 <p className="text-[11px] text-slate-500 mt-0.5 truncate">
                   {lang === 'zh'
-                    ? `本名：${currentUser.realName}（僅雙向解除匿名時顯示）`
+                    ? `本名：${currentUser.realName}（僅雙向解除匿名或女宿實名任務時顯示）`
                     : `Real Name: ${currentUser.realName} (shown only on mutual reveal)`}
                 </p>
               )}
               <p className="text-slate-500 text-[11px] mt-0.5 truncate">
-                {currentUser.department} · {currentUser.year} · {currentUser.dormLocation}
+                {currentUser.department} · {currentUser.year} ·{' '}
+                {localizeLocationName(currentUser.dormLocation, lang, currentUser.dormLocationEn)}
               </p>
               <div className="flex items-center gap-1 text-[11px] text-emerald-700 font-bold font-mono mt-1 truncate">
                 <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
@@ -207,6 +284,39 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </div>
             </div>
 
+            {/* Required Biological Sex Selector for Dorm Safety */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                {lang === 'zh'
+                  ? '生理性別 (必填 · 用於女宿安全隔離保護)'
+                  : 'Biological Sex (Required · Dorm Safety)'}
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditBiologicalSex('female')}
+                  className={`py-2 rounded-xl border text-xs font-bold cursor-pointer ${
+                    editBiologicalSex === 'female'
+                      ? 'bg-rose-50 border-rose-500 text-rose-900'
+                      : 'bg-slate-50 border-slate-200 text-slate-600'
+                  }`}
+                >
+                  {lang === 'zh' ? '生理女 (Female)' : 'Female'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditBiologicalSex('male')}
+                  className={`py-2 rounded-xl border text-xs font-bold cursor-pointer ${
+                    editBiologicalSex === 'male'
+                      ? 'bg-sky-50 border-sky-500 text-sky-900'
+                      : 'bg-slate-50 border-slate-200 text-slate-600'
+                  }`}
+                >
+                  {lang === 'zh' ? '生理男 (Male)' : 'Male'}
+                </button>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] font-bold text-slate-700 mb-1">
@@ -271,9 +381,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </label>
                 <div className="grid grid-cols-3 gap-1">
                   {[
-                    { id: 'downhill', label: '山下' },
-                    { id: 'uphill', label: '山上' },
-                    { id: 'dorms', label: '舍區' },
+                    { id: 'downhill', label: lang === 'zh' ? '山下' : 'Downhill' },
+                    { id: 'uphill', label: lang === 'zh' ? '山上' : 'Uphill' },
+                    { id: 'dorms', label: lang === 'zh' ? '舍區' : 'Dorms' },
                   ].map((z) => (
                     <button
                       key={z.id}
@@ -553,7 +663,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       </div>
 
-      {/* My Published Tasks & Quick Management */}
+      {/* My Published Tasks & Full Edit/Delete Management */}
       <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-2xs space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
@@ -561,7 +671,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <span>{lang === 'zh' ? '我的發布紀錄（快速管理）' : 'My Published Tasks'}</span>
           </h3>
           <span className="text-[11px] text-slate-400">
-            {lang === 'zh' ? '即時調整報價與時效' : 'Quick Manage'}
+            {lang === 'zh' ? '編輯、刪除、加價與延時' : 'Edit, Delete & Manage'}
           </span>
         </div>
 
@@ -581,6 +691,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 post.remainingMinutes !== undefined
                   ? formatRemainingMinutes(post.remainingMinutes, lang)
                   : post.timeRemainingText || post.expiresAt;
+              const isQuotaCat = post.category === 'leftovers' || post.category === 'group_buy';
+              const localizedLoc = localizeLocationName(
+                post.locationName,
+                lang,
+                post.locationNameEn
+              );
 
               return (
                 <div
@@ -620,8 +736,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                                   ? '大廳推流中'
                                   : 'Live in Feed'}
                         </span>
-                        <span className="text-[11px] text-slate-500">{post.locationName}</span>
-                        {post.totalQuota !== undefined && post.totalQuota > 1 && (
+                        <span className="text-[11px] text-slate-500">{localizedLoc}</span>
+                        {isQuotaCat && post.totalQuota !== undefined && post.totalQuota > 1 && (
                           <span className="text-[10px] font-mono bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">
                             {lang === 'zh'
                               ? `剩 ${post.remainingQuota}/${post.totalQuota} 份`
@@ -649,45 +765,65 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     </div>
                   </div>
 
-                  {!isClosed && (
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/70">
-                      <span className="text-[10px] text-slate-400 truncate">
-                        {formatPaymentMethodLabel(post.paymentMethod, lang)}
-                      </span>
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/70">
+                    <span className="text-[10px] text-slate-400 truncate">
+                      {formatPaymentMethodLabel(post.paymentMethod, lang)}
+                    </span>
 
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {isExpired ? (
+                    <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                      {!isClosed && (
+                        <>
+                          {isExpired ? (
+                            <button
+                              type="button"
+                              onClick={() => onRepublishPost(post.id)}
+                              className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>{lang === 'zh' ? '重新上架' : 'Republish'}</span>
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => onAddReward(post.id, 10)}
+                                className="px-2 py-1.5 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg font-bold text-[11px] flex items-center gap-0.5 cursor-pointer transition-colors"
+                              >
+                                <Plus className="w-3 h-3" />
+                                <span>{lang === 'zh' ? 'NT$10 加價' : '+NT$10'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onExtendTime(post.id, 30)}
+                                className="px-2 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg font-bold text-[11px] flex items-center gap-0.5 cursor-pointer transition-colors"
+                              >
+                                <Clock className="w-3 h-3" />
+                                <span>{lang === 'zh' ? '+30m' : '+30m'}</span>
+                              </button>
+                            </>
+                          )}
+
                           <button
                             type="button"
-                            onClick={() => onRepublishPost(post.id)}
-                            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                            onClick={() => onEditPost(post)}
+                            className="px-2 py-1.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-lg font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
                           >
-                            <RotateCcw className="w-3 h-3" />
-                            <span>{lang === 'zh' ? '一鍵重新上架' : 'Republish (2h)'}</span>
+                            <Pencil className="w-3 h-3" />
+                            <span>{lang === 'zh' ? '編輯' : 'Edit'}</span>
                           </button>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => onAddReward(post.id, 10)}
-                              className="px-2.5 py-1.5 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg font-bold text-[11px] flex items-center gap-0.5 cursor-pointer transition-colors"
-                            >
-                              <Plus className="w-3 h-3" />
-                              <span>{lang === 'zh' ? 'NT$10 加價' : 'NT$10 Boost'}</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => onExtendTime(post.id, 30)}
-                              className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg font-bold text-[11px] flex items-center gap-0.5 cursor-pointer transition-colors"
-                            >
-                              <Clock className="w-3 h-3" />
-                              <span>{lang === 'zh' ? '+30m 延時' : '+30m Extend'}</span>
-                            </button>
-                          </>
-                        )}
-                      </div>
+                        </>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => onDeletePost(post)}
+                        className="px-2 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>{lang === 'zh' ? '刪除' : 'Delete'}</span>
+                      </button>
                     </div>
-                  )}
+                  </div>
                 </div>
               );
             })}
@@ -717,12 +853,20 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               {gate === 'line_pay'
                 ? 'Line Pay'
                 : gate === 'jko_pay'
-                  ? '街口支付'
+                  ? lang === 'zh'
+                    ? '街口支付'
+                    : 'JKOPAY'
                   : gate === 'taiwan_pay'
-                    ? '台灣 Pay'
+                    ? lang === 'zh'
+                      ? '台灣 Pay'
+                      : 'Taiwan Pay'
                     : gate === 'cash_meetup'
-                      ? '面交現金'
-                      : '線下轉帳'}
+                      ? lang === 'zh'
+                        ? '面交現金'
+                        : 'Cash'
+                      : lang === 'zh'
+                        ? '線下轉帳'
+                        : 'Bank Transfer'}
             </span>
           ))}
         </div>

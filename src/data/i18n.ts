@@ -6,6 +6,7 @@ export const I18N = {
     downhill: '山下校區',
     uphill: '山上校區',
     dorms: '宿舍區',
+    off_campus: '指南路周邊',
     allZones: '全校區',
 
     // Core Tabs
@@ -30,9 +31,11 @@ export const I18N = {
     negotiable: '可議價',
     timeLeft: '剩餘',
     distance: '距離',
+    translateToEn: '🌐 翻譯為英文',
 
     // Post Modal & Pickers
     createTitle: '發布校園任務',
+    editTitle: '編輯校園任務',
     titlePlaceholder: '請輸入標題 (支援自由輸入)...',
     descPlaceholder: '詳細內容說明...',
     aiRefine: '✨ 潤飾內容',
@@ -45,7 +48,8 @@ export const I18N = {
     time30m: '+30分鐘',
     time1h: '+1小時',
     pricing: '價格與付款方向',
-    femaleReminder: '女宿進入提醒 (友善標籤，非強制阻擋)',
+    femaleReminder: '限女生宿舍 / 僅限生理女接單',
+    femaleLockNotice: '女宿安全規範：為保障住宿安全，本任務僅限實名發布與實名接單',
     anonymousToggle: '匿名防護發布',
     publishBtn: '發布任務',
     publishFreeBtn: '免費發布互助',
@@ -63,14 +67,14 @@ export const I18N = {
     disputeHarassment: '騷擾不當言論',
     disputeImpersonation: '假冒身分',
     disputeOther: '其他爭議事項',
-    submitDispute: '送出舉報',
+    submitDispute: '送出舉報（交由審核）',
     post: '發布',
     revealedStatus: '雙方已同意解除匿名',
     revealRequested: '已同意解除匿名，等待對方同意',
-    requestReveal: '同意解除匿名',
+    requestReveal: '同意解除匿名並查看資料',
 
     // Onboarding
-    onboardingTitle: '政大學生三步快速驗證',
+    onboardingTitle: '政大校園帳號三步驗證',
     step1: '1. 政大信箱驗證',
     step2: '2. 設置個人檔案',
     step3: '3. 收付款偏好 (選填)',
@@ -82,6 +86,7 @@ export const I18N = {
     downhill: 'Downhill',
     uphill: 'Uphill',
     dorms: 'Dorms Area',
+    off_campus: 'Zhinan Rd.',
     allZones: 'All Zones',
 
     // Core Tabs
@@ -106,9 +111,11 @@ export const I18N = {
     negotiable: 'Negotiable',
     timeLeft: 'Left',
     distance: 'Distance',
+    translateToEn: '🌐 Translate to English',
 
     // Post Modal & Pickers
     createTitle: 'Create Campus Task',
+    editTitle: 'Edit Campus Task',
     titlePlaceholder: 'Enter task title...',
     descPlaceholder: 'Detailed description...',
     aiRefine: '✨ Polish Text',
@@ -121,7 +128,8 @@ export const I18N = {
     time30m: '+30m',
     time1h: '+1h',
     pricing: 'Price & Payment Direction',
-    femaleReminder: 'Female Dorm Reminder (Non-blocking tag)',
+    femaleReminder: 'Female Dorm Only (Biological Female Only)',
+    femaleLockNotice: 'Female Dorm Safety Policy: Real-name posting and real-name claiming are mandatory for this task.',
     anonymousToggle: 'Post Anonymously',
     publishBtn: 'Publish Task',
     publishFreeBtn: 'Publish Free Task',
@@ -139,14 +147,14 @@ export const I18N = {
     disputeHarassment: 'Harassment / Abuse',
     disputeImpersonation: 'Impersonation',
     disputeOther: 'Other Issue',
-    submitDispute: 'Submit Report',
+    submitDispute: 'Submit Report for Review',
     post: 'Post',
     revealedStatus: 'Mutual Real Identity Revealed',
     revealRequested: 'Agreed to reveal, awaiting peer',
-    requestReveal: 'Consent to Reveal ID',
+    requestReveal: 'Consent to Reveal ID & Profile',
 
     // Onboarding
-    onboardingTitle: '3-Step Student Onboarding',
+    onboardingTitle: '3-Step NCCU Verification',
     step1: '1. NCCU Email Sign-In',
     step2: '2. Profile Setup',
     step3: '3. Payment Preferences',

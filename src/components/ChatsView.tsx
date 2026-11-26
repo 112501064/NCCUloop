@@ -2,6 +2,7 @@ import React from 'react';
 import { OrderItem, UserProfile, Language } from '../types';
 import { I18N } from '../data/i18n';
 import { formatPaymentMethodLabel, formatRemainingMinutes } from '../utils/formatters';
+import { localizeLocationName, isFemaleDormLocationName } from '../utils/lbs';
 import { MessageSquare, Clock, ArrowRight } from 'lucide-react';
 
 interface ChatsViewProps {
@@ -51,8 +52,12 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         <div className="space-y-3">
           {userOrders.map((order) => {
             const isCreator = order.creatorUid === currentUser.id;
-            const bothRevealed =
-              order.revealCreator === true && order.revealAccepter === true;
+            const isFemaleDormOrder = Boolean(
+              order.isFemaleDormOnly || isFemaleDormLocationName(order.taskLocation)
+            );
+            const bothRevealed = Boolean(
+              isFemaleDormOrder || (order.revealCreator === true && order.revealAccepter === true)
+            );
             const peerNick = isCreator ? order.accepterName : order.creatorName;
             const peerReal = isCreator ? order.accepterRealName : order.creatorRealName;
 
@@ -64,7 +69,11 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 ? '匿名同學'
                 : 'Anonymous Peer';
 
-            const avatarInitial = bothRevealed ? peerNick.slice(0, 1) : '匿';
+            const avatarInitial = bothRevealed
+              ? peerNick.slice(0, 1)
+              : lang === 'zh'
+                ? '匿'
+                : '?';
 
             const minsLeft = order.taskExpireAt
               ? Math.max(0, Math.round((order.taskExpireAt - Date.now()) / 60000))
@@ -76,6 +85,48 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                   ? '進行中'
                   : 'Active';
 
+            const localizedLocation = localizeLocationName(
+              order.taskLocation,
+              lang,
+              order.taskLocationEn
+            );
+
+            const statusBadgeClass =
+              order.status === 'in_progress'
+                ? 'bg-emerald-100 text-emerald-800'
+                : order.status === 'pending_approval' || order.status === 'pending_confirm'
+                  ? 'bg-sky-100 text-sky-800'
+                  : order.status === 'completed'
+                    ? 'bg-slate-100 text-slate-700'
+                    : order.status === 'cancelled'
+                      ? 'bg-slate-200 text-slate-600'
+                      : 'bg-rose-100 text-rose-800';
+
+            const statusLabel =
+              order.status === 'in_progress'
+                ? lang === 'zh'
+                  ? '進行中'
+                  : 'In Progress'
+                : order.status === 'pending_approval'
+                  ? lang === 'zh'
+                    ? '待發布者審核'
+                    : 'Pending Approval'
+                  : order.status === 'pending_confirm'
+                    ? lang === 'zh'
+                      ? '待發布者確認接單'
+                      : 'Pending Confirm'
+                    : order.status === 'completed'
+                      ? lang === 'zh'
+                        ? '已結案'
+                        : 'Completed'
+                      : order.status === 'cancelled'
+                        ? lang === 'zh'
+                          ? '已取消 / 婉拒'
+                          : 'Declined / Cancelled'
+                        : lang === 'zh'
+                          ? '爭議凍結'
+                          : 'Disputed';
+
             return (
               <div
                 key={order.id}
@@ -84,12 +135,18 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="relative shrink-0">
-                    <div className="w-11 h-11 rounded-xl bg-emerald-700/10 border border-emerald-600/30 text-emerald-800 flex items-center justify-center font-bold text-sm">
+                    <div
+                      className={`w-11 h-11 rounded-xl border flex items-center justify-center font-bold text-sm ${
+                        order.taskCategory === 'emergency'
+                          ? 'bg-rose-50 border-rose-200 text-rose-700'
+                          : 'bg-emerald-700/10 border-emerald-600/30 text-emerald-800'
+                      }`}
+                    >
                       {avatarInitial}
                     </div>
                     <span
                       className={`w-2.5 h-2.5 rounded-full absolute -bottom-0.5 -right-0.5 border-2 border-white ${
-                        order.status === 'completed'
+                        order.status === 'completed' || order.status === 'cancelled'
                           ? 'bg-slate-400'
                           : order.status === 'disputed'
                             ? 'bg-rose-500'
@@ -104,34 +161,18 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                         {otherPartyName}
                       </span>
                       <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                          order.status === 'in_progress'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : order.status === 'pending_confirm'
-                              ? 'bg-sky-100 text-sky-800'
-                              : order.status === 'completed'
-                                ? 'bg-slate-100 text-slate-700'
-                                : 'bg-rose-100 text-rose-800'
-                        }`}
+                        className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${statusBadgeClass}`}
                       >
-                        {order.status === 'in_progress'
-                          ? lang === 'zh'
-                            ? '進行中'
-                            : 'In Progress'
-                          : order.status === 'pending_confirm'
-                            ? lang === 'zh'
-                              ? '待發布者確認接單'
-                              : 'Pending Confirm'
-                            : order.status === 'completed'
-                              ? lang === 'zh'
-                                ? '已結案'
-                                : 'Completed'
-                              : lang === 'zh'
-                                ? '爭議凍結'
-                                : 'Disputed'}
+                        {statusLabel}
                       </span>
                       <span className="text-[10px] text-slate-400 font-mono">
-                        {isCreator ? (lang === 'zh' ? '我發布' : 'Creator') : lang === 'zh' ? '我接單' : 'Accepter'}
+                        {isCreator
+                          ? lang === 'zh'
+                            ? '我發布'
+                            : 'Creator'
+                          : lang === 'zh'
+                            ? '我接單'
+                            : 'Accepter'}
                       </span>
                     </div>
 
@@ -141,8 +182,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
                     <div className="text-[11px] text-slate-400 truncate">
                       {lang === 'zh'
-                        ? `地點：${order.taskLocation} · ${formatPaymentMethodLabel(order.paymentMethod, lang)}`
-                        : `${order.taskLocation} · ${formatPaymentMethodLabel(order.paymentMethod, lang)}`}
+                        ? `地點：${localizedLocation} · ${formatPaymentMethodLabel(order.paymentMethod, lang)}`
+                        : `${localizedLocation} · ${formatPaymentMethodLabel(order.paymentMethod, lang)}`}
                     </div>
                   </div>
                 </div>

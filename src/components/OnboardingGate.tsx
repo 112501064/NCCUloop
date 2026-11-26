@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { signInWithPopup, signOut } from 'firebase/auth';
 import { auth, googleProvider } from '../firebase';
-import { UserProfile, Language, CampusZone } from '../types';
-import { APP_CONFIG } from '../config/appConfig';
+import { UserProfile, Language, CampusZone, BiologicalSex } from '../types';
+import { APP_CONFIG, isAllowedNccuEmail } from '../config/appConfig';
 import { NccuLoopLogo } from './NccuLoopLogo';
 import {
   CheckCircle2,
@@ -32,18 +32,18 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
 }) => {
   const [step, setStep] = useState<number>(1);
 
-  // Step 1: Firebase Google Authentication (@g.nccu.edu.tw)
+  // Step 1: Firebase Google Authentication (@g.nccu.edu.tw or @nccu.edu.tw)
   const [isSigningIn, setIsSigningIn] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string>('');
   const [verifiedUid, setVerifiedUid] = useState<string>('');
   const [verifiedEmail, setVerifiedEmail] = useState<string>('');
   const [verifiedAvatar, setVerifiedAvatar] = useState<string>('');
 
-  // Step 2: Basic Profile (Nickname + Real Name)
+  // Step 2: Basic Profile (Nickname + Real Name + Required Biological Sex)
   const [nickname, setNickname] = useState<string>('');
   const [realName, setRealName] = useState<string>('');
   const [selectedZone, setSelectedZone] = useState<CampusZone>('downhill');
-  const [selectedGender, setSelectedGender] = useState<'undisclosed' | 'female' | 'male'>('undisclosed');
+  const [biologicalSex, setBiologicalSex] = useState<BiologicalSex | null>(null);
 
   // Step 3: Preferred Offline / Transfer Payment Methods (Optional)
   const [selectedGateways, setSelectedGateways] = useState<string[]>(['line_pay', 'jko_pay']);
@@ -57,12 +57,12 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
       const user = result.user;
       const email = user.email?.trim() || '';
 
-      if (!email.toLowerCase().endsWith('@g.nccu.edu.tw')) {
+      if (!isAllowedNccuEmail(email)) {
         await signOut(auth);
         setAuthError(
           lang === 'zh'
-            ? '僅限政大學生信箱 (@g.nccu.edu.tw)'
-            : 'Only @g.nccu.edu.tw student accounts are allowed.'
+            ? '僅限政大校園信箱 (@g.nccu.edu.tw 或 @nccu.edu.tw) 登入使用'
+            : 'Only @g.nccu.edu.tw or @nccu.edu.tw accounts are allowed.'
         );
         return;
       }
@@ -102,12 +102,13 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
   };
 
   const handleVerifyStep2 = () => {
-    if (!nickname.trim() || !realName.trim()) return;
+    if (!nickname.trim() || !realName.trim() || !biologicalSex) return;
     setStep(3);
   };
 
   const handleFinish = (withPayment: boolean) => {
-    const emailPrefix = verifiedEmail.split('@')[0] || 'nccu_student';
+    const emailPrefix = verifiedEmail.split('@')[0] || 'nccu_member';
+    const sex: BiologicalSex = biologicalSex || 'female';
     onComplete({
       id: verifiedUid || undefined,
       nccuEmail: verifiedEmail,
@@ -117,7 +118,8 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
       name: nickname.trim(),
       nameEn: nickname.trim(),
       avatar: verifiedAvatar || undefined,
-      gender: selectedGender,
+      biologicalSex: sex,
+      gender: sex,
       zone: selectedZone,
       trustScore: 90,
       helpCount: 0,
@@ -136,10 +138,30 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
   };
 
   const paymentOptions = [
-    { id: 'jko_pay', name: '街口支付 (JKOPAY)', desc: '線下或聊天室轉帳確認', icon: '⚡' },
-    { id: 'taiwan_pay', name: '台灣 Pay', desc: '學生金融卡即時轉帳', icon: '🏛️' },
-    { id: 'line_pay', name: 'Line Pay', desc: '好友轉帳與現場掃碼', icon: '💬' },
-    { id: 'cash_meetup', name: '面交現金', desc: '校園碰面現場點清付款', icon: '💵' },
+    {
+      id: 'jko_pay',
+      name: lang === 'zh' ? '街口支付 (JKOPAY)' : 'JKOPAY',
+      desc: lang === 'zh' ? '線下或聊天室轉帳確認' : 'Manual transfer confirmation',
+      icon: '⚡',
+    },
+    {
+      id: 'taiwan_pay',
+      name: lang === 'zh' ? '台灣 Pay' : 'Taiwan Pay',
+      desc: lang === 'zh' ? '學生金融卡即時轉帳' : 'Bank transfer',
+      icon: '🏛️',
+    },
+    {
+      id: 'line_pay',
+      name: 'Line Pay',
+      desc: lang === 'zh' ? '好友轉帳與現場掃碼' : 'Line Pay transfer / QR',
+      icon: '💬',
+    },
+    {
+      id: 'cash_meetup',
+      name: lang === 'zh' ? '面交現金' : 'Cash on Meetup',
+      desc: lang === 'zh' ? '校園碰面現場點清付款' : 'Cash exchange at campus meetup',
+      icon: '💵',
+    },
   ];
 
   return (
@@ -153,7 +175,6 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
           </span>
         </div>
 
-        {/* Minimalist Bilingual Toggle Button */}
         <button
           onClick={onToggleLang}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-200/90 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-2xs transition-all cursor-pointer"
@@ -164,10 +185,9 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
         </button>
       </header>
 
-      {/* Center Card Gate (Airbnb & Linear Clean Modern Aesthetic) */}
+      {/* Center Card Gate */}
       <main className="w-full max-w-md my-auto py-6">
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 sm:p-8 space-y-6">
-          {/* Brand Header */}
           <div className="text-center space-y-2">
             <div className="flex justify-center mb-1">
               <NccuLoopLogo size="lg" />
@@ -196,7 +216,7 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
             ))}
           </div>
 
-          {/* STEP 1: Firebase Google Authentication (@g.nccu.edu.tw) */}
+          {/* STEP 1: Firebase Google Authentication (@g.nccu.edu.tw or @nccu.edu.tw) */}
           {step === 1 && (
             <div className="space-y-5 pt-1 animate-in fade-in duration-150">
               <div className="space-y-1">
@@ -208,8 +228,8 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                 </h2>
                 <p className="text-[11px] text-slate-500 leading-relaxed">
                   {lang === 'zh'
-                    ? '僅限政大學生信箱 (@g.nccu.edu.tw) 登入使用，確保校園安全互助環境。'
-                    : 'Restricted exclusively to @g.nccu.edu.tw student accounts for a safe campus community.'}
+                    ? '請使用 @g.nccu.edu.tw 或 @nccu.edu.tw 帳號登入，確保校園安全互助環境。'
+                    : 'Please sign in with your @g.nccu.edu.tw or @nccu.edu.tw account.'}
                 </p>
               </div>
 
@@ -217,8 +237,8 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                 <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
                 <span>
                   {lang === 'zh'
-                    ? '系統將自動確認政大學生身分，非政大信箱無法進入平台。'
-                    : 'Only verified @g.nccu.edu.tw student accounts are permitted.'}
+                    ? '支援政大學生 (@g.nccu.edu.tw) 與教職員 (@nccu.edu.tw) 信箱驗證，外部帳號無法進入。'
+                    : 'Supports verified @g.nccu.edu.tw student and @nccu.edu.tw faculty/staff accounts.'}
                 </span>
               </div>
 
@@ -257,8 +277,8 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                         ? '正在驗證政大 Google 帳號...'
                         : 'Verifying NCCU Google Account...'
                       : lang === 'zh'
-                        ? '使用政大 Google 帳號登入 (Sign in with NCCU Google)'
-                        : 'Sign in with NCCU Google (@g.nccu.edu.tw)'}
+                        ? '使用政大 Google 帳號登入 (Sign in with NCCU)'
+                        : 'Sign in with NCCU Google Account'}
                   </span>
                 </button>
 
@@ -272,7 +292,7 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
             </div>
           )}
 
-          {/* STEP 2: Basic Profile Setup (Nickname + Real Name) */}
+          {/* STEP 2: Basic Profile Setup (Nickname + Real Name + Required Biological Sex) */}
           {step === 2 && (
             <div className="space-y-4 pt-1 animate-in fade-in duration-150">
               <div className="space-y-1">
@@ -289,7 +309,6 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* Required: Nickname */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     {lang === 'zh' ? '校園暱稱 (必填)' : 'Nickname (Required)'}
@@ -304,7 +323,6 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                   />
                 </div>
 
-                {/* Required: Real Name */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     {lang === 'zh' ? '真實姓名 (必填)' : 'Real Name (Required)'}
@@ -321,12 +339,43 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
               </div>
               <p className="text-[10px] text-slate-400 -mt-2">
                 {lang === 'zh'
-                  ? '平時大廳與個人主頁僅顯示「暱稱」；唯有雙方同意解除匿名時，聊天室才會顯示「暱稱（本名）」。'
-                  : 'Only your nickname is shown publicly. Your real name appears only when both parties consent in chat.'}
+                  ? '平時大廳與個人主頁僅顯示「暱稱」；唯有雙方同意解除匿名或女宿實名任務時，才顯示「暱稱（本名）」。'
+                  : 'Only your nickname is shown publicly unless both parties consent or for female-dorm safety tasks.'}
               </p>
 
-              {/* Optional: Language Capsule Buttons */}
-              <div className="space-y-1.5 pt-1">
+              {/* Required Biological Sex */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-700">
+                    {lang === 'zh' ? '生理性別 (必填 · 用於宿舍安全防護)' : 'Biological Sex (Required)'}
+                  </label>
+                  <span className="text-[10px] text-rose-600 font-semibold">
+                    {lang === 'zh' ? '女宿任務隔離依據' : 'For dorm safety'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'female', zh: '生理女', en: 'Female' },
+                    { id: 'male', zh: '生理男', en: 'Male' },
+                  ].map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => setBiologicalSex(g.id as BiologicalSex)}
+                      className={`py-2.5 px-3 rounded-xl border text-xs text-center cursor-pointer transition-all ${
+                        biologicalSex === g.id
+                          ? 'bg-slate-900 text-white border-slate-900 font-bold shadow-2xs'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {lang === 'zh' ? g.zh : g.en}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Language Capsule Buttons */}
+              <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-slate-700">
                   {lang === 'zh' ? '系統語言偏好' : 'Language Preference'}
                 </label>
@@ -360,7 +409,7 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                 </div>
               </div>
 
-              {/* Optional: Campus Zone Capsules */}
+              {/* Campus Zone Capsules */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-slate-700">
                   {lang === 'zh' ? '常駐校區 (選填)' : 'Frequent Campus Area'}
@@ -387,40 +436,6 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                 </div>
               </div>
 
-              {/* Optional: Gender Tag Capsules */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-slate-700">
-                    {lang === 'zh' ? '性別標籤 (選填)' : 'Gender Tag (Optional)'}
-                  </label>
-                  <span className="text-[10px] text-slate-400">
-                    {lang === 'zh' ? '僅用於附加任務提醒' : 'For secondary task filters only'}
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {[
-                    { id: 'undisclosed', zh: '不公開', en: 'Hidden' },
-                    { id: 'female', zh: '生理女', en: 'Female' },
-                    { id: 'male', zh: '生理男', en: 'Male' },
-                  ].map((g) => (
-                    <button
-                      key={g.id}
-                      type="button"
-                      onClick={() =>
-                        setSelectedGender(g.id as 'undisclosed' | 'female' | 'male')
-                      }
-                      className={`py-2 px-2 rounded-xl border text-xs text-center cursor-pointer transition-all ${
-                        selectedGender === g.id
-                          ? 'bg-slate-900 text-white border-slate-900 font-bold shadow-2xs'
-                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      {lang === 'zh' ? g.zh : g.en}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               <div className="flex gap-2 pt-2">
                 <button
                   type="button"
@@ -432,7 +447,7 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
                 </button>
                 <button
                   type="button"
-                  disabled={!nickname.trim() || !realName.trim()}
+                  disabled={!nickname.trim() || !realName.trim() || !biologicalSex}
                   onClick={handleVerifyStep2}
                   className="flex-1 py-3 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
                 >
@@ -524,11 +539,10 @@ export const OnboardingGate: React.FC<OnboardingGateProps> = ({
         </div>
       </main>
 
-      {/* Footer with environment-gated Demo Quick Login (Hidden in Production Builds) */}
       <footer className="w-full max-w-4xl flex items-center justify-between py-2 text-[11px] text-slate-400">
         <span>© 2026 {APP_CONFIG.appNameEn} · National Chengchi University</span>
         <div className="flex items-center gap-3">
-          <span>{lang === 'zh' ? '政大學生實名驗證' : 'Verified NCCU Student'}</span>
+          <span>{lang === 'zh' ? '政大校園實名驗證' : 'Verified NCCU Account'}</span>
           {isDemoEnabled && onQuickDemoLogin && (
             <button
               type="button"
