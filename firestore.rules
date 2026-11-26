@@ -386,6 +386,11 @@ service cloud.firestore {
             && incoming().accepterAnonymous == false
             && incoming().revealCreator == true
             && incoming().revealAccepter == true)
+          ||
+          (incoming().creatorAnonymous == false
+            && incoming().accepterAnonymous == false
+            && incoming().revealCreator == true
+            && incoming().revealAccepter == true)
         )
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;

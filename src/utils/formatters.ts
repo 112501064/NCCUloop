@@ -42,6 +42,32 @@ export function containsChinese(text?: string): boolean {
   return /[\u4e00-\u9fff]/.test(text);
 }
 
+const REVIEW_TAG_EN_MAP: Record<string, string> = {
+  準時面交: 'Punctual',
+  回覆迅速: 'Fast Reply',
+  親切友善: 'Friendly',
+  守信用: 'Reliable',
+  說明清楚: 'Clear Info',
+  交易順利: 'Smooth Trade',
+};
+
+export function localizeReviewTag(tag: string, lang: Language): string {
+  if (lang === 'zh') return tag;
+  return REVIEW_TAG_EN_MAP[tag.trim()] || tag;
+}
+
+export function localizeTimeString(text: string, lang: Language): string {
+  if (lang === 'zh') return text;
+  const trimmed = text.trim();
+  if (trimmed === '剛剛' || trimmed === '剛剛重新上架') return 'Just now';
+  const minMatch = trimmed.match(/^(\d+)\s*分鐘前$/);
+  if (minMatch) return `${minMatch[1]}m ago`;
+  const hrMatch = trimmed.match(/^(\d+)\s*小時前$/);
+  if (hrMatch) return `${hrMatch[1]}h ago`;
+  if (trimmed === '已過期') return 'Expired';
+  return trimmed;
+}
+
 const SYSTEM_MESSAGE_PAIRS: Array<{ zh: string; en: string }> = [
   {
     zh: '［接單通知］我已申請接單／領取名額，請雙方於此即時聊天室確認交付細節！',
@@ -50,6 +76,14 @@ const SYSTEM_MESSAGE_PAIRS: Array<{ zh: string; en: string }> = [
   {
     zh: '［接單通知］我已申請接單，請先於聊天室解除匿名並檢視資料後確認接單！',
     en: '[Notice] I applied for this task. Let us reveal profiles first before confirming the order!',
+  },
+  {
+    zh: '［接單通知］我已申請接單，請發布者點擊我的個人檔案與評價審核確認！',
+    en: '[Notice] I applied for this task. Please review my profile and confirm the order!',
+  },
+  {
+    zh: '［接單通知］我已實名申請接單，請雙方確認資料後點擊確認接單！',
+    en: '[Notice] I applied with my verified real name. Please review and confirm the order!',
   },
   {
     zh: '［系統通知］發布者已確認接受訂單，請於聊天室約定面交細節！',
@@ -121,7 +155,42 @@ export function localizeChatMessageText(text: string, lang: Language): string {
   return text;
 }
 
+const TX_STORAGE_KEY = 'nccu_loop_tx_cache_v1';
 const translationCache = new Map<string, string>();
+const inFlightTranslations = new Map<string, Promise<string>>();
+
+// Hydrate cache from localStorage once on startup
+try {
+  const raw = window.localStorage.getItem(TX_STORAGE_KEY);
+  if (raw) {
+    const parsed = JSON.parse(raw) as Record<string, string>;
+    Object.entries(parsed).forEach(([k, v]) => {
+      if (typeof v === 'string' && v) {
+        translationCache.set(k, v);
+      }
+    });
+  }
+} catch {
+  // ignore storage errors
+}
+
+function persistTranslationCache() {
+  try {
+    const entries = Array.from(translationCache.entries()).slice(-300);
+    const obj: Record<string, string> = {};
+    entries.forEach(([k, v]) => {
+      obj[k] = v;
+    });
+    window.localStorage.setItem(TX_STORAGE_KEY, JSON.stringify(obj));
+  } catch {
+    // ignore quota errors
+  }
+}
+
+export function getCachedTranslation(text?: string): string | undefined {
+  if (!text) return undefined;
+  return translationCache.get(text.trim());
+}
 
 export async function translateTextToEnglish(text: string): Promise<string> {
   const clean = text.trim();
@@ -131,44 +200,56 @@ export async function translateTextToEnglish(text: string): Promise<string> {
   const cached = translationCache.get(clean);
   if (cached) return cached;
 
-  try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=zh-TW&tl=en&dt=t&q=${encodeURIComponent(
-      clean
-    )}`;
-    const res = await fetch(url);
-    if (res.ok) {
-      const data = (await res.json()) as unknown;
-      if (Array.isArray(data) && Array.isArray(data[0])) {
-        const translated = (data[0] as unknown[])
-          .map((seg) => (Array.isArray(seg) && typeof seg[0] === 'string' ? seg[0] : ''))
-          .join('')
-          .trim();
+  const pending = inFlightTranslations.get(clean);
+  if (pending) return pending;
+
+  const task = (async () => {
+    try {
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=${encodeURIComponent(
+        clean
+      )}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = (await res.json()) as unknown;
+        if (Array.isArray(data) && Array.isArray(data[0])) {
+          const translated = (data[0] as unknown[])
+            .map((seg) => (Array.isArray(seg) && typeof seg[0] === 'string' ? seg[0] : ''))
+            .join('')
+            .trim();
+          if (translated) {
+            translationCache.set(clean, translated);
+            persistTranslationCache();
+            return translated;
+          }
+        }
+      }
+    } catch {
+      // try secondary free endpoint
+    }
+
+    try {
+      const mmUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(
+        clean.slice(0, 450)
+      )}&langpair=zh-TW|en`;
+      const res = await fetch(mmUrl);
+      if (res.ok) {
+        const data = (await res.json()) as { responseData?: { translatedText?: string } };
+        const translated = data?.responseData?.translatedText?.trim();
         if (translated) {
           translationCache.set(clean, translated);
+          persistTranslationCache();
           return translated;
         }
       }
+    } catch {
+      // ignore offline fallback
     }
-  } catch {
-    // try secondary free endpoint
-  }
 
-  try {
-    const mmUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(
-      clean.slice(0, 450)
-    )}&langpair=zh-TW|en`;
-    const res = await fetch(mmUrl);
-    if (res.ok) {
-      const data = (await res.json()) as { responseData?: { translatedText?: string } };
-      const translated = data?.responseData?.translatedText?.trim();
-      if (translated) {
-        translationCache.set(clean, translated);
-        return translated;
-      }
-    }
-  } catch {
-    // ignore offline fallback
-  }
+    return clean;
+  })().finally(() => {
+    inFlightTranslations.delete(clean);
+  });
 
-  return clean;
+  inFlightTranslations.set(clean, task);
+  return task;
 }

@@ -7,8 +7,16 @@ import {
   ReviewItem,
   BiologicalSex,
 } from '../types';
-import { formatRemainingMinutes, formatPaymentMethodLabel } from '../utils/formatters';
-import { localizeLocationName } from '../utils/lbs';
+import {
+  formatRemainingMinutes,
+  formatPaymentMethodLabel,
+  localizeReviewTag,
+} from '../utils/formatters';
+import {
+  useAutoTranslateText,
+  useAutoTranslateLocation,
+  useAutoTranslateArray,
+} from '../hooks/useAutoTranslate';
 import {
   ShieldCheck,
   GraduationCap,
@@ -54,6 +62,208 @@ interface ProfileViewProps {
 
 const GRADE_SUGGESTIONS = ['大一', '大二', '大三', '大四', '碩一', '碩二', '交換生'];
 
+const ReceivedReviewCard: React.FC<{ rev: ReviewItem; lang: Language }> = ({ rev, lang }) => {
+  const displayTaskTitle = useAutoTranslateText(rev.taskTitle, lang);
+  const displayComment = useAutoTranslateText(rev.comment, lang);
+  const displayTags = useAutoTranslateArray(
+    rev.tags.map((tg) => localizeReviewTag(tg, lang)),
+    lang
+  );
+
+  return (
+    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="font-bold text-slate-900 truncate">{rev.reviewerName}</span>
+          {displayTaskTitle && (
+            <span className="text-[10px] text-slate-500 truncate max-w-[160px]">
+              · {displayTaskTitle}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-0.5 shrink-0">
+          {Array.from({ length: rev.rating }).map((_, idx) => (
+            <Star key={idx} className="w-3 h-3 fill-amber-400 text-amber-500" />
+          ))}
+        </div>
+      </div>
+
+      {displayTags.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {displayTags.map((tg, idx) => (
+            <span
+              key={idx}
+              className="px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full text-[10px] font-medium"
+            >
+              {tg}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {displayComment && (
+        <p className="text-[11px] text-slate-700 leading-relaxed">{displayComment}</p>
+      )}
+    </div>
+  );
+};
+
+const MyPostCard: React.FC<{
+  post: PostItem;
+  onSelectPost: (post: PostItem) => void;
+  onRepublishPost: (postId: string) => void;
+  onAddReward: (postId: string, delta: number) => void;
+  onExtendTime: (postId: string, minutes: number) => void;
+  onEditPost: (post: PostItem) => void;
+  onDeletePost: (post: PostItem) => void;
+  lang: Language;
+}> = ({
+  post,
+  onSelectPost,
+  onRepublishPost,
+  onAddReward,
+  onExtendTime,
+  onEditPost,
+  onDeletePost,
+  lang,
+}) => {
+  const isExpired = post.status === 'expired' || post.status === 'refunded';
+  const isClosed =
+    post.status === 'completed' ||
+    post.status === 'cancelled' ||
+    post.status === 'closed';
+  const displayTime =
+    post.remainingMinutes !== undefined
+      ? formatRemainingMinutes(post.remainingMinutes, lang)
+      : post.timeRemainingText || post.expiresAt;
+  const isQuotaCat = post.category === 'leftovers' || post.category === 'group_buy';
+  const localizedLoc = useAutoTranslateLocation(post.locationName, lang, post.locationNameEn);
+  const displayTitle = useAutoTranslateText(post.title, lang, post.titleEn);
+
+  return (
+    <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2.5">
+      <div className="flex items-start justify-between gap-2">
+        <div onClick={() => onSelectPost(post)} className="min-w-0 cursor-pointer group">
+          <div className="flex items-center gap-1.5 flex-wrap mb-1">
+            <span
+              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                isExpired
+                  ? 'bg-slate-200 text-slate-600'
+                  : isClosed
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : post.status === 'in_progress'
+                      ? 'bg-sky-100 text-sky-800'
+                      : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+              }`}
+            >
+              {isExpired
+                ? lang === 'zh'
+                  ? '已過期'
+                  : 'Expired'
+                : isClosed
+                  ? lang === 'zh'
+                    ? '已額滿 / 結案'
+                    : 'Closed'
+                  : post.status === 'in_progress'
+                    ? lang === 'zh'
+                      ? '進行中'
+                      : 'In Progress'
+                    : lang === 'zh'
+                      ? '大廳推流中'
+                      : 'Live in Feed'}
+            </span>
+            <span className="text-[11px] text-slate-500">{localizedLoc}</span>
+            {isQuotaCat && post.totalQuota !== undefined && post.totalQuota > 1 && (
+              <span className="text-[10px] font-mono bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">
+                {lang === 'zh'
+                  ? `剩 ${post.remainingQuota}/${post.totalQuota} 份`
+                  : `${post.remainingQuota}/${post.totalQuota} left`}
+              </span>
+            )}
+          </div>
+          <h4 className="font-bold text-slate-900 text-xs group-hover:underline line-clamp-1">
+            {displayTitle}
+          </h4>
+        </div>
+
+        <div className="text-right shrink-0">
+          <span className="font-mono font-bold text-emerald-800 text-xs block tabular-nums">
+            {post.rewardAmount === 0
+              ? lang === 'zh'
+                ? '免費'
+                : 'Free'
+              : `NT$ ${post.rewardAmount}`}
+          </span>
+          <span className="text-[10px] font-mono text-slate-500 flex items-center justify-end gap-0.5 mt-0.5 tabular-nums">
+            <Clock className="w-3 h-3" />
+            {displayTime}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/70">
+        <span className="text-[10px] text-slate-400 truncate">
+          {formatPaymentMethodLabel(post.paymentMethod, lang)}
+        </span>
+
+        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+          {!isClosed && (
+            <>
+              {isExpired ? (
+                <button
+                  type="button"
+                  onClick={() => onRepublishPost(post.id)}
+                  className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>{lang === 'zh' ? '重新上架' : 'Republish'}</span>
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => onAddReward(post.id, 10)}
+                    className="px-2 py-1.5 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg font-bold text-[11px] flex items-center gap-0.5 cursor-pointer transition-colors"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>{lang === 'zh' ? 'NT$10 加價' : '+NT$10'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onExtendTime(post.id, 30)}
+                    className="px-2 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg font-bold text-[11px] flex items-center gap-0.5 cursor-pointer transition-colors"
+                  >
+                    <Clock className="w-3 h-3" />
+                    <span>{lang === 'zh' ? '+30m' : '+30m'}</span>
+                  </button>
+                </>
+              )}
+
+              <button
+                type="button"
+                onClick={() => onEditPost(post)}
+                className="px-2 py-1.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-lg font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
+              >
+                <Pencil className="w-3 h-3" />
+                <span>{lang === 'zh' ? '編輯' : 'Edit'}</span>
+              </button>
+            </>
+          )}
+
+          <button
+            type="button"
+            onClick={() => onDeletePost(post)}
+            className="px-2 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
+          >
+            <Trash2 className="w-3 h-3" />
+            <span>{lang === 'zh' ? '刪除' : 'Delete'}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const ProfileView: React.FC<ProfileViewProps> = ({
   currentUser,
   myPosts,
@@ -90,6 +300,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   const [newSkillText, setNewSkillText] = useState<string>('');
   const [newTagText, setNewTagText] = useState<string>('');
+
+  const displayDepartment = useAutoTranslateText(currentUser.department, lang);
+  const displayYear = useAutoTranslateText(currentUser.year, lang);
+  const displayDormLocation = useAutoTranslateLocation(
+    currentUser.dormLocation,
+    lang,
+    currentUser.dormLocationEn
+  );
+  const displayBio = useAutoTranslateText(currentUser.bio, lang);
+  const displayTutorSkills = useAutoTranslateArray(currentUser.canTutorSubjects, lang);
+  const displayFollowedTags = useAutoTranslateArray(currentUser.subscribedTags, lang);
 
   const handleOpenEdit = () => {
     setEditNickname(currentUser.nickname || currentUser.name);
@@ -214,8 +435,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </p>
               )}
               <p className="text-slate-500 text-[11px] mt-0.5 truncate">
-                {currentUser.department} · {currentUser.year} ·{' '}
-                {localizeLocationName(currentUser.dormLocation, lang, currentUser.dormLocationEn)}
+                {displayDepartment} · {displayYear} · {displayDormLocation}
               </p>
               <div className="flex items-center gap-1 text-[11px] text-emerald-700 font-bold font-mono mt-1 truncate">
                 <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
@@ -242,9 +462,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
 
         {/* Bio display */}
-        {!isEditingProfile && currentUser.bio && (
+        {!isEditingProfile && displayBio && (
           <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-100 rounded-xl px-3.5 py-2 leading-relaxed">
-            {currentUser.bio}
+            {displayBio}
           </p>
         )}
 
@@ -484,43 +704,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         ) : (
           <div className="space-y-2.5">
             {receivedReviews.map((rev) => (
-              <div
-                key={rev.id}
-                className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1.5"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-bold text-slate-900 truncate">{rev.reviewerName}</span>
-                    {rev.taskTitle && (
-                      <span className="text-[10px] text-slate-500 truncate max-w-[160px]">
-                        · {rev.taskTitle}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    {Array.from({ length: rev.rating }).map((_, idx) => (
-                      <Star key={idx} className="w-3 h-3 fill-amber-400 text-amber-500" />
-                    ))}
-                  </div>
-                </div>
-
-                {rev.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {rev.tags.map((tg, idx) => (
-                      <span
-                        key={idx}
-                        className="px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full text-[10px] font-medium"
-                      >
-                        {tg}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {rev.comment && (
-                  <p className="text-[11px] text-slate-700 leading-relaxed">{rev.comment}</p>
-                )}
-              </div>
+              <ReceivedReviewCard key={rev.id} rev={rev} lang={lang} />
             ))}
           </div>
         )}
@@ -580,13 +764,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               {lang === 'zh' ? '尚未新增專長或輔導項目' : 'No skills added yet.'}
             </span>
           ) : (
-            currentUser.canTutorSubjects.map((sub) => (
+            currentUser.canTutorSubjects.map((sub, idx) => (
               <span
                 key={sub}
                 className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-900 border border-emerald-200 px-2.5 py-1 rounded-full text-[11px] font-medium"
               >
                 <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
-                <span>{sub}</span>
+                <span>{displayTutorSkills[idx] ?? sub}</span>
                 <button
                   type="button"
                   onClick={() => onRemoveTutorSkill(sub)}
@@ -643,12 +827,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               {lang === 'zh' ? '尚未追蹤任何標籤' : 'No followed tags yet.'}
             </span>
           ) : (
-            currentUser.subscribedTags.map((tag) => (
+            currentUser.subscribedTags.map((tag, idx) => (
               <span
                 key={tag}
                 className="inline-flex items-center gap-1 bg-slate-900 text-white pl-3 pr-1.5 py-1 rounded-full text-[11px] font-mono font-medium"
               >
-                <span>{tag}</span>
+                <span>{displayFollowedTags[idx] ?? tag}</span>
                 <button
                   type="button"
                   onClick={() => onRemoveFollowedTag(tag)}
@@ -681,152 +865,19 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </div>
         ) : (
           <div className="space-y-2.5">
-            {myPosts.map((post) => {
-              const isExpired = post.status === 'expired' || post.status === 'refunded';
-              const isClosed =
-                post.status === 'completed' ||
-                post.status === 'cancelled' ||
-                post.status === 'closed';
-              const displayTime =
-                post.remainingMinutes !== undefined
-                  ? formatRemainingMinutes(post.remainingMinutes, lang)
-                  : post.timeRemainingText || post.expiresAt;
-              const isQuotaCat = post.category === 'leftovers' || post.category === 'group_buy';
-              const localizedLoc = localizeLocationName(
-                post.locationName,
-                lang,
-                post.locationNameEn
-              );
-
-              return (
-                <div
-                  key={post.id}
-                  className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2.5"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div
-                      onClick={() => onSelectPost(post)}
-                      className="min-w-0 cursor-pointer group"
-                    >
-                      <div className="flex items-center gap-1.5 flex-wrap mb-1">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            isExpired
-                              ? 'bg-slate-200 text-slate-600'
-                              : isClosed
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : post.status === 'in_progress'
-                                  ? 'bg-sky-100 text-sky-800'
-                                  : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                          }`}
-                        >
-                          {isExpired
-                            ? lang === 'zh'
-                              ? '已過期'
-                              : 'Expired'
-                            : isClosed
-                              ? lang === 'zh'
-                                ? '已額滿 / 結案'
-                                : 'Closed'
-                              : post.status === 'in_progress'
-                                ? lang === 'zh'
-                                  ? '進行中'
-                                  : 'In Progress'
-                                : lang === 'zh'
-                                  ? '大廳推流中'
-                                  : 'Live in Feed'}
-                        </span>
-                        <span className="text-[11px] text-slate-500">{localizedLoc}</span>
-                        {isQuotaCat && post.totalQuota !== undefined && post.totalQuota > 1 && (
-                          <span className="text-[10px] font-mono bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">
-                            {lang === 'zh'
-                              ? `剩 ${post.remainingQuota}/${post.totalQuota} 份`
-                              : `${post.remainingQuota}/${post.totalQuota} left`}
-                          </span>
-                        )}
-                      </div>
-                      <h4 className="font-bold text-slate-900 text-xs group-hover:underline line-clamp-1">
-                        {lang === 'zh' ? post.title : post.titleEn || post.title}
-                      </h4>
-                    </div>
-
-                    <div className="text-right shrink-0">
-                      <span className="font-mono font-bold text-emerald-800 text-xs block tabular-nums">
-                        {post.rewardAmount === 0
-                          ? lang === 'zh'
-                            ? '免費'
-                            : 'Free'
-                          : `NT$ ${post.rewardAmount}`}
-                      </span>
-                      <span className="text-[10px] font-mono text-slate-500 flex items-center justify-end gap-0.5 mt-0.5 tabular-nums">
-                        <Clock className="w-3 h-3" />
-                        {displayTime}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/70">
-                    <span className="text-[10px] text-slate-400 truncate">
-                      {formatPaymentMethodLabel(post.paymentMethod, lang)}
-                    </span>
-
-                    <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                      {!isClosed && (
-                        <>
-                          {isExpired ? (
-                            <button
-                              type="button"
-                              onClick={() => onRepublishPost(post.id)}
-                              className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
-                            >
-                              <RotateCcw className="w-3 h-3" />
-                              <span>{lang === 'zh' ? '重新上架' : 'Republish'}</span>
-                            </button>
-                          ) : (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => onAddReward(post.id, 10)}
-                                className="px-2 py-1.5 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg font-bold text-[11px] flex items-center gap-0.5 cursor-pointer transition-colors"
-                              >
-                                <Plus className="w-3 h-3" />
-                                <span>{lang === 'zh' ? 'NT$10 加價' : '+NT$10'}</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => onExtendTime(post.id, 30)}
-                                className="px-2 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg font-bold text-[11px] flex items-center gap-0.5 cursor-pointer transition-colors"
-                              >
-                                <Clock className="w-3 h-3" />
-                                <span>{lang === 'zh' ? '+30m' : '+30m'}</span>
-                              </button>
-                            </>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => onEditPost(post)}
-                            className="px-2 py-1.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-lg font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
-                          >
-                            <Pencil className="w-3 h-3" />
-                            <span>{lang === 'zh' ? '編輯' : 'Edit'}</span>
-                          </button>
-                        </>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => onDeletePost(post)}
-                        className="px-2 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        <span>{lang === 'zh' ? '刪除' : 'Delete'}</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+            {myPosts.map((post) => (
+              <MyPostCard
+                key={post.id}
+                post={post}
+                onSelectPost={onSelectPost}
+                onRepublishPost={onRepublishPost}
+                onAddReward={onAddReward}
+                onExtendTime={onExtendTime}
+                onEditPost={onEditPost}
+                onDeletePost={onDeletePost}
+                lang={lang}
+              />
+            ))}
           </div>
         )}
       </div>

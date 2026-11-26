@@ -3,12 +3,9 @@ import {
   collection,
   query,
   orderBy,
-  where,
   onSnapshot,
   addDoc,
   updateDoc,
-  getDoc,
-  getDocs,
   doc,
   serverTimestamp,
 } from 'firebase/firestore';
@@ -17,21 +14,19 @@ import {
   OrderItem,
   OrderMessage,
   UserProfile,
-  PublicProfileItem,
   ReviewItem,
   PaymentDirection,
   Language,
 } from '../types';
 import { I18N } from '../data/i18n';
-import { DEMO_USERS } from '../data/mockData';
 import {
   formatPaymentMethodLabel,
   formatRemainingMinutes,
   localizeChatMessageText,
-  containsChinese,
-  translateTextToEnglish,
+  localizeTimeString,
 } from '../utils/formatters';
-import { localizeLocationName, isFemaleDormLocationName } from '../utils/lbs';
+import { isFemaleDormLocationName } from '../utils/lbs';
+import { useAutoTranslateText, useAutoTranslateLocation } from '../hooks/useAutoTranslate';
 import {
   X,
   Send,
@@ -47,12 +42,8 @@ import {
   UserPlus,
   Star,
   Siren,
-  ShieldCheck,
-  ChevronDown,
-  ChevronUp,
-  Globe,
-  Loader2,
   XCircle,
+  IdCard,
 } from 'lucide-react';
 
 interface ChatRoomModalProps {
@@ -63,10 +54,10 @@ interface ChatRoomModalProps {
   useFirestoreRealtime: boolean;
   existingReview?: ReviewItem | null;
   localMessages?: OrderMessage[];
-  localReviews?: ReviewItem[];
   onLocalSendMessage?: (orderId: string, text: string) => void;
   onLocalUpdateOrder?: (orderId: string, patch: Partial<OrderItem>) => void;
   onDeclineOrder?: (order: OrderItem) => Promise<void> | void;
+  onOpenPeerProfile?: (order: OrderItem) => void;
   onSubmitReview: (params: {
     order: OrderItem;
     rating: number;
@@ -81,6 +72,55 @@ interface ChatRoomModalProps {
 const REVIEW_QUICK_TAGS_ZH = ['準時面交', '回覆迅速', '親切友善', '守信用', '說明清楚'];
 const REVIEW_QUICK_TAGS_EN = ['Punctual', 'Fast Reply', 'Friendly', 'Reliable', 'Clear Info'];
 
+const ChatMessageBubble: React.FC<{
+  msg: OrderMessage;
+  isMe: boolean;
+  otherPartyDisplayName: string;
+  lang: Language;
+}> = ({ msg, isMe, otherPartyDisplayName, lang }) => {
+  const baseText = localizeChatMessageText(msg.text, lang);
+  const translatedText = useAutoTranslateText(baseText, lang);
+  const isSystem = msg.senderUid === 'system';
+
+  if (isSystem) {
+    return (
+      <div className="text-center my-1.5">
+        <span className="inline-block text-[10px] text-slate-500 bg-slate-200/70 px-3 py-1 rounded-xl max-w-[90%]">
+          {translatedText}
+        </span>
+      </div>
+    );
+  }
+
+  const senderDisplayName = isMe
+    ? lang === 'zh'
+      ? '我'
+      : 'Me'
+    : otherPartyDisplayName;
+
+  return (
+    <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} space-y-1`}>
+      <div className="flex items-center gap-1.5 text-[10px] text-slate-400 px-1">
+        <span>{senderDisplayName}</span>
+        <span>·</span>
+        <span className="font-mono">
+          {localizeTimeString(msg.timestampText || '剛剛', lang)}
+        </span>
+      </div>
+
+      <div
+        className={`p-3 rounded-2xl text-xs leading-relaxed max-w-[85%] ${
+          isMe
+            ? 'bg-emerald-700 text-white rounded-br-xs'
+            : 'bg-white text-slate-800 border border-slate-200 shadow-2xs rounded-bl-xs'
+        }`}
+      >
+        {translatedText}
+      </div>
+    </div>
+  );
+};
+
 export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
   isOpen,
   onClose,
@@ -89,10 +129,10 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
   useFirestoreRealtime,
   existingReview,
   localMessages = [],
-  localReviews = [],
   onLocalSendMessage,
   onLocalUpdateOrder,
   onDeclineOrder,
+  onOpenPeerProfile,
   onSubmitReview,
   onOpenDispute,
   onShowToast,
@@ -103,16 +143,6 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
   const [isSending, setIsSending] = useState<boolean>(false);
   const [isDeclining, setIsDeclining] = useState<boolean>(false);
 
-  // Unlocked peer public profile & historical reviews
-  const [peerProfile, setPeerProfile] = useState<PublicProfileItem | null>(null);
-  const [peerReviews, setPeerReviews] = useState<ReviewItem[]>([]);
-  const [isLoadingPeerInfo, setIsLoadingPeerInfo] = useState<boolean>(false);
-  const [isPeerPanelExpanded, setIsPeerPanelExpanded] = useState<boolean>(true);
-
-  // Optional title translation in English mode
-  const [translatedTaskTitle, setTranslatedTaskTitle] = useState<string | null>(null);
-  const [isTranslatingTitle, setIsTranslatingTitle] = useState<boolean>(false);
-
   // Post-completion review form state
   const [rating, setRating] = useState<number>(5);
   const [selectedTags, setSelectedTags] = useState<string[]>(['準時面交', '親切友善']);
@@ -122,15 +152,17 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const isCreator = currentUser.id === order.creatorUid;
-  const peerUid = isCreator ? order.accepterUid : order.creatorUid;
   const isFemaleDormOrder = Boolean(
     order.isFemaleDormOnly || isFemaleDormLocationName(order.taskLocation)
   );
-  // STRICT MUTUAL REVEAL: true when both consented OR mandatory real-name female dorm order
+  const isNonAnonymousTask = !order.creatorAnonymous;
+  // Revealed when non-anonymous task, female-dorm real-ID task, or mutual consent completed
   const bothRevealed = Boolean(
-    isFemaleDormOrder || (order.revealCreator === true && order.revealAccepter === true)
+    isFemaleDormOrder ||
+      isNonAnonymousTask ||
+      (order.revealCreator === true && order.revealAccepter === true)
   );
-  const iRevealed = isFemaleDormOrder
+  const iRevealed = bothRevealed
     ? true
     : isCreator
       ? order.revealCreator === true
@@ -172,136 +204,6 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
     return () => unsubscribe();
   }, [isOpen, order.id, useFirestoreRealtime]);
 
-  // Fetch peer public profile & historical reviews once mutual reveal is unlocked
-  useEffect(() => {
-    if (!isOpen || !bothRevealed || !peerUid) {
-      setPeerProfile(null);
-      setPeerReviews([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    const loadPeerDetails = async () => {
-      if (!useFirestoreRealtime || !auth.currentUser) {
-        const demoPeer = DEMO_USERS.find((u) => u.id === peerUid);
-        const fallbackProf: PublicProfileItem = demoPeer
-          ? {
-              uid: demoPeer.id,
-              nickname: demoPeer.nickname,
-              biologicalSex: demoPeer.biologicalSex,
-              department: demoPeer.department,
-              year: demoPeer.year,
-              dormLocation: demoPeer.dormLocation,
-              zone: demoPeer.zone,
-              bio: demoPeer.bio,
-              canTutorSubjects: demoPeer.canTutorSubjects,
-              trustScore: demoPeer.trustScore,
-              helpCount: demoPeer.helpCount,
-            }
-          : {
-              uid: peerUid,
-              nickname: isCreator ? order.accepterName : order.creatorName,
-              department: '政大學生',
-              year: '在校生',
-              trustScore: 90,
-              helpCount: 0,
-            };
-        if (!cancelled) {
-          setPeerProfile(fallbackProf);
-          setPeerReviews(
-            localReviews
-              .filter((r) => r.revieweeUid === peerUid)
-              .sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0))
-          );
-        }
-        return;
-      }
-
-      setIsLoadingPeerInfo(true);
-      try {
-        const [profSnap, revSnap] = await Promise.all([
-          getDoc(doc(db, 'public_profiles', peerUid)).catch(() => null),
-          getDocs(query(collection(db, 'reviews'), where('revieweeUid', '==', peerUid))).catch(
-            () => null
-          ),
-        ]);
-
-        if (cancelled) return;
-
-        if (profSnap && profSnap.exists()) {
-          const d = profSnap.data();
-          setPeerProfile({
-            uid: String(d.uid || peerUid),
-            nickname: String(d.nickname || (isCreator ? order.accepterName : order.creatorName)),
-            biologicalSex: d.biologicalSex === 'female' || d.biologicalSex === 'male' ? d.biologicalSex : undefined,
-            department: String(d.department || '政大學生'),
-            year: String(d.year || '在校生'),
-            dormLocation: d.dormLocation ? String(d.dormLocation) : undefined,
-            bio: d.bio ? String(d.bio) : undefined,
-            canTutorSubjects: Array.isArray(d.canTutorSubjects)
-              ? d.canTutorSubjects.map(String)
-              : [],
-            trustScore: typeof d.trustScore === 'number' ? d.trustScore : 90,
-            helpCount: typeof d.helpCount === 'number' ? d.helpCount : 0,
-          });
-        } else {
-          setPeerProfile({
-            uid: peerUid,
-            nickname: isCreator ? order.accepterName : order.creatorName,
-            department: '政大驗證同學',
-            year: '在校生',
-            trustScore: 90,
-            helpCount: 0,
-          });
-        }
-
-        if (revSnap) {
-          const revs: ReviewItem[] = revSnap.docs
-            .map((docSnap) => {
-              const d = docSnap.data();
-              const ts = d.createdAt?.toDate ? (d.createdAt.toDate() as Date) : null;
-              return {
-                id: docSnap.id,
-                orderId: String(d.orderId || ''),
-                taskId: String(d.taskId || ''),
-                taskTitle: d.taskTitle ? String(d.taskTitle) : undefined,
-                taskCategory: d.taskCategory || 'marketplace',
-                reviewerUid: String(d.reviewerUid || ''),
-                reviewerName: String(d.reviewerName || '政大同學'),
-                revieweeUid: String(d.revieweeUid || ''),
-                rating: typeof d.rating === 'number' ? d.rating : 5,
-                tags: Array.isArray(d.tags) ? d.tags.map(String) : [],
-                comment: d.comment ? String(d.comment) : '',
-                scoreDelta: typeof d.scoreDelta === 'number' ? d.scoreDelta : 0,
-                createdAtMs: ts ? ts.getTime() : Date.now(),
-              };
-            })
-            .sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0));
-          setPeerReviews(revs);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoadingPeerInfo(false);
-        }
-      }
-    };
-
-    void loadPeerDetails();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    isOpen,
-    bothRevealed,
-    peerUid,
-    useFirestoreRealtime,
-    isCreator,
-    order.accepterName,
-    order.creatorName,
-    localReviews,
-  ]);
-
   const messages = useFirestoreRealtime ? firestoreMessages : localMessages;
 
   useEffect(() => {
@@ -310,9 +212,15 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
     }
   }, [isOpen, messages.length]);
 
-  useEffect(() => {
-    setTranslatedTaskTitle(null);
-  }, [order.id]);
+  // Automatic English translation hooks (called unconditionally before early return)
+  const displayedTaskTitle = useAutoTranslateText(order.taskTitle, lang, order.taskTitleEn);
+  const localizedLocation = useAutoTranslateLocation(
+    order.taskLocation,
+    lang,
+    order.taskLocationEn
+  );
+  const displayedPaymentNote = useAutoTranslateText(order.paymentNote, lang);
+  const displayedDisputeReason = useAutoTranslateText(order.disputeReason, lang);
 
   if (!isOpen) return null;
 
@@ -338,34 +246,6 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
     : lang === 'zh'
       ? '匿'
       : '?';
-
-  const localizedLocation = localizeLocationName(
-    order.taskLocation,
-    lang,
-    order.taskLocationEn
-  );
-
-  const displayedTaskTitle =
-    lang === 'zh'
-      ? order.taskTitle
-      : translatedTaskTitle ||
-        (order.taskTitleEn && !containsChinese(order.taskTitleEn)
-          ? order.taskTitleEn
-          : order.taskTitle);
-
-  const showTitleTranslateBtn =
-    lang === 'en' && containsChinese(displayedTaskTitle) && !translatedTaskTitle;
-
-  const handleTranslateTitle = async () => {
-    if (isTranslatingTitle) return;
-    setIsTranslatingTitle(true);
-    try {
-      const en = await translateTextToEnglish(order.taskTitle);
-      setTranslatedTaskTitle(en);
-    } finally {
-      setIsTranslatingTitle(false);
-    }
-  };
 
   // CLEAR PAYMENT DIRECTION: creator_pays | accepter_pays | free
   const effectiveDirection: PaymentDirection =
@@ -527,7 +407,7 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
   };
 
   const handleConsentReveal = async () => {
-    if (isFemaleDormOrder) return;
+    if (isFemaleDormOrder || bothRevealed) return;
     const myNick = currentUser.nickname || currentUser.name;
     const myReal = currentUser.realName || myNick;
     const patch: Partial<OrderItem> = isCreator
@@ -620,16 +500,21 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-150">
       <div className="bg-white rounded-2xl w-full max-w-lg h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden text-xs">
-        {/* Chat Top Banner (Red Urgent styling for Emergency SOS) */}
+        {/* Clean Chat Top Header */}
         <div
-          className={`text-white p-3.5 sm:p-4 flex items-center justify-between shrink-0 ${
+          className={`text-white p-3.5 sm:p-4 flex items-center justify-between gap-2 shrink-0 ${
             isEmergency ? 'bg-rose-950' : 'bg-slate-900'
           }`}
         >
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="relative shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <button
+              type="button"
+              onClick={() => onOpenPeerProfile?.(order)}
+              className="relative shrink-0 cursor-pointer group"
+              title={lang === 'zh' ? '查看對方個人檔案與評價' : 'View Peer Profile & Reviews'}
+            >
               <div
-                className={`w-9 h-9 rounded-full border flex items-center justify-center text-sm font-bold text-white ${
+                className={`w-9 h-9 rounded-full border flex items-center justify-center text-sm font-bold text-white transition-transform group-hover:scale-105 ${
                   isEmergency
                     ? 'bg-rose-600/40 border-rose-400/60'
                     : 'bg-emerald-600/30 border-emerald-400/50'
@@ -638,7 +523,7 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
                 {otherPartyAvatarChar}
               </div>
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 absolute bottom-0 right-0 border-2 border-slate-900"></span>
-            </div>
+            </button>
 
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
@@ -648,46 +533,26 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
                     <span>{lang === 'zh' ? '緊急救援' : 'SOS'}</span>
                   </span>
                 )}
-                <span className="font-bold text-sm text-white truncate">
-                  {otherPartyDisplayName}
-                </span>
-                <span
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono shrink-0 ${
-                    bothRevealed
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
-                      : 'bg-slate-700 text-slate-300'
-                  }`}
+                <button
+                  type="button"
+                  onClick={() => onOpenPeerProfile?.(order)}
+                  className="font-bold text-sm text-white truncate hover:underline cursor-pointer text-left"
                 >
-                  {isFemaleDormOrder
-                    ? lang === 'zh'
-                      ? '女宿實名保護'
-                      : 'Female Dorm Real-ID'
-                    : bothRevealed
-                      ? lang === 'zh'
-                        ? '已公開資料'
-                        : 'ID Revealed'
-                      : lang === 'zh'
-                        ? '🛡️ 匿名防護中'
-                        : '🛡️ Anonymous'}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 max-w-xs">
-                <p className="text-[11px] text-slate-300 truncate">{displayedTaskTitle}</p>
-                {showTitleTranslateBtn && (
+                  {otherPartyDisplayName}
+                </button>
+                {onOpenPeerProfile && (
                   <button
                     type="button"
-                    onClick={() => void handleTranslateTitle()}
-                    disabled={isTranslatingTitle}
-                    className="text-[10px] text-emerald-300 hover:underline shrink-0 cursor-pointer flex items-center gap-0.5"
+                    onClick={() => onOpenPeerProfile(order)}
+                    className="px-2 py-0.5 rounded-md bg-white/15 hover:bg-white/25 text-white border border-white/20 text-[10px] font-semibold flex items-center gap-1 shrink-0 cursor-pointer transition-colors"
                   >
-                    {isTranslatingTitle ? (
-                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                    ) : (
-                      <Globe className="w-2.5 h-2.5" />
-                    )}
-                    <span>EN</span>
+                    <IdCard className="w-3 h-3 text-emerald-300" />
+                    <span>{lang === 'zh' ? '查看檔案' : 'Profile'}</span>
                   </button>
                 )}
+              </div>
+              <div className="flex items-center gap-1.5 max-w-xs mt-0.5">
+                <p className="text-[11px] text-slate-300 truncate">{displayedTaskTitle}</p>
               </div>
             </div>
           </div>
@@ -744,149 +609,52 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
               </span>
             </div>
 
-            {order.paymentNote && !isFreeOrder && (
+            {displayedPaymentNote && !isFreeOrder && (
               <div className="col-span-2 pt-1 border-t border-slate-200/70 text-[10px] text-slate-600 truncate">
                 <span className="font-semibold text-slate-500">
                   {lang === 'zh' ? '收款備註：' : 'Account Note: '}
                 </span>
-                <span className="font-mono">{order.paymentNote}</span>
+                <span className="font-mono">{displayedPaymentNote}</span>
               </div>
             )}
           </div>
         </div>
 
-        {/* Unlocked Peer Profile & Historical Reviews Panel (after Mutual Reveal) */}
-        {bothRevealed && (
-          <div className="bg-emerald-50/70 border-b border-emerald-200 px-3.5 py-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => setIsPeerPanelExpanded((v) => !v)}
-              className="w-full flex items-center justify-between text-[11px] font-bold text-emerald-950 cursor-pointer"
-            >
-              <span className="flex items-center gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
-                <span>
-                  {lang === 'zh'
-                    ? `已解鎖對方檔案：${otherPartyDisplayName}`
-                    : `Unlocked Profile: ${otherPartyDisplayName}`}
-                </span>
-              </span>
-              <span className="flex items-center gap-1 text-emerald-700">
-                {peerProfile && (
-                  <span className="font-mono">
-                    ★{peerProfile.trustScore} · {peerProfile.helpCount}
-                    {lang === 'zh' ? '次' : ' helps'}
-                  </span>
-                )}
-                {isPeerPanelExpanded ? (
-                  <ChevronUp className="w-3.5 h-3.5" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5" />
-                )}
-              </span>
-            </button>
-
-            {isPeerPanelExpanded && (
-              <div className="mt-2 pt-2 border-t border-emerald-200/80 space-y-2 text-[11px]">
-                {isLoadingPeerInfo ? (
-                  <div className="flex items-center gap-1.5 text-emerald-800">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    <span>{lang === 'zh' ? '載入對方檔案與評價中...' : 'Loading peer profile...'}</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex flex-wrap items-center justify-between gap-2 bg-white/90 border border-emerald-200 rounded-xl px-2.5 py-2">
-                      <div className="min-w-0">
-                        <p className="font-bold text-slate-900">
-                          {peerProfile?.department || (lang === 'zh' ? '政大學生' : 'NCCU Student')} ·{' '}
-                          {peerProfile?.year || ''}
-                        </p>
-                        {peerProfile?.bio && (
-                          <p className="text-[10px] text-slate-500 truncate mt-0.5">
-                            {peerProfile.bio}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0 font-mono">
-                        <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 font-bold">
-                          ★ {peerProfile?.trustScore ?? 90}
-                        </span>
-                        <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-semibold">
-                          {lang === 'zh'
-                            ? `互助 ${peerProfile?.helpCount ?? 0} 次`
-                            : `${peerProfile?.helpCount ?? 0} helps`}
-                        </span>
-                      </div>
-                    </div>
-
-                    {peerReviews.length === 0 ? (
-                      <p className="text-[10px] text-slate-500 px-1">
-                        {lang === 'zh'
-                          ? '歷史評價：尚無過往互助評價紀錄（新加入同學預設信任指數 90 分）。'
-                          : 'Past Reviews: No prior reviews yet.'}
-                      </p>
-                    ) : (
-                      <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
-                        {peerReviews.slice(0, 3).map((rev) => (
-                          <div
-                            key={rev.id}
-                            className="bg-white/90 border border-slate-200 rounded-lg px-2.5 py-1.5 flex items-start justify-between gap-2"
-                          >
-                            <div className="min-w-0">
-                              <span className="font-semibold text-slate-800">{rev.reviewerName}</span>
-                              {rev.tags.length > 0 && (
-                                <span className="text-[10px] text-emerald-700 ml-1.5">
-                                  {rev.tags.slice(0, 3).join(' · ')}
-                                </span>
-                              )}
-                              {rev.comment && (
-                                <p className="text-[10px] text-slate-600 truncate">{rev.comment}</p>
-                              )}
-                            </div>
-                            <span className="text-[10px] text-amber-600 font-mono font-bold shrink-0">
-                              ★{rev.rating}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Order State Controls */}
+        {/* Compact Order State Controls */}
         <div className="bg-slate-50 border-b border-slate-200 px-3.5 py-2.5 shrink-0 space-y-2">
-          {/* Stage 1: Pending Approval -> Mutual Reveal -> Creator Confirm or Decline */}
+          {/* Stage 1: Pending Approval Compact Bar */}
           {isPendingApproval && (
-            <div className="bg-sky-50 border border-sky-200 rounded-xl p-2.5 space-y-2 text-[11px]">
-              <div className="flex items-start justify-between gap-2">
-                <span className="font-semibold text-sky-950 leading-relaxed">
-                  {!bothRevealed
-                    ? lang === 'zh'
-                      ? '⏳ 申請接單審核中：請雙方先點擊「同意解除匿名並查看資料」，確認對方系級與歷史評價後再正式成立訂單。'
-                      : '⏳ Pending approval: Mutual ID reveal unlocks peer profile & past reviews before confirming.'
-                    : isCreator
-                      ? lang === 'zh'
-                        ? '✅ 雙方已公開資料並解鎖歷史評價！請確認是否由他接單：'
-                        : '✅ Profiles & reviews unlocked! Confirm or decline this applicant:'
-                      : lang === 'zh'
-                        ? '⏳ 已解鎖雙方資料，等待發布者點擊「確認由他接單（正式成立）」...'
-                        : '⏳ Profiles revealed. Waiting for creator to confirm your application...'}
-                </span>
-              </div>
+            <div className="bg-sky-50 border border-sky-200 rounded-xl px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+              <span className="font-semibold text-sky-950">
+                {isCreator
+                  ? lang === 'zh'
+                    ? '⏳ 待審核接單申請'
+                    : '⏳ Pending applicant approval'
+                  : lang === 'zh'
+                    ? '⏳ 已送出接單申請，等待發布者審核確認'
+                    : '⏳ Application sent, waiting for creator approval'}
+              </span>
 
-              <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {!bothRevealed && !iRevealed && (
                   <button
                     type="button"
                     onClick={handleConsentReveal}
-                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold cursor-pointer flex items-center gap-1"
+                    className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold cursor-pointer flex items-center gap-1"
                   >
-                    <UserCheck className="w-3.5 h-3.5" />
+                    <UserCheck className="w-3 h-3" />
                     <span>{t.requestReveal}</span>
+                  </button>
+                )}
+
+                {onOpenPeerProfile && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenPeerProfile(order)}
+                    className="px-2.5 py-1 bg-white hover:bg-sky-100 text-sky-900 border border-sky-300 rounded-lg font-bold cursor-pointer flex items-center gap-1"
+                  >
+                    <IdCard className="w-3 h-3" />
+                    <span>{lang === 'zh' ? '查看檔案審核' : 'Review Profile'}</span>
                   </button>
                 )}
 
@@ -897,36 +665,20 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
                         type="button"
                         disabled={isDeclining}
                         onClick={() => void handleDeclineClick()}
-                        className="px-3 py-1.5 bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 rounded-lg font-bold cursor-pointer flex items-center gap-1 disabled:opacity-50"
+                        className="px-2.5 py-1 bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 rounded-lg font-bold cursor-pointer flex items-center gap-1 disabled:opacity-50"
                       >
-                        <XCircle className="w-3.5 h-3.5" />
-                        <span>{lang === 'zh' ? '婉拒此申請' : 'Decline'}</span>
+                        <XCircle className="w-3 h-3" />
+                        <span>{lang === 'zh' ? '婉拒' : 'Decline'}</span>
                       </button>
                     )}
 
                     <button
                       type="button"
-                      disabled={!bothRevealed}
-                      onClick={handleConfirmAcceptOrder}
-                      title={
-                        !bothRevealed
-                          ? lang === 'zh'
-                            ? '須雙方同意解除匿名並查看資料後才可確認成立'
-                            : 'Mutual profile reveal required first'
-                          : undefined
-                      }
-                      className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1 ${
-                        bothRevealed
-                          ? 'bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer shadow-2xs'
-                          : 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                      }`}
+                      onClick={() => void handleConfirmAcceptOrder()}
+                      className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
                     >
-                      <UserPlus className="w-3.5 h-3.5" />
-                      <span>
-                        {lang === 'zh'
-                          ? '✅ 確認由他接單（正式成立）'
-                          : '✅ Confirm Applicant (Start Order)'}
-                      </span>
+                      <UserPlus className="w-3 h-3" />
+                      <span>{lang === 'zh' ? '確認接單' : 'Confirm'}</span>
                     </button>
                   </>
                 )}
@@ -947,11 +699,11 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
           {order.status === 'disputed' && (
             <div className="bg-rose-50 border border-rose-200 rounded-xl px-3 py-2 text-[11px] text-rose-800 font-semibold">
               ⚠️ {lang === 'zh' ? '此訂單已送出舉報並暫停進行（待管理員審核）' : 'Order flagged for admin review'}
-              {order.disputeReason ? `：${order.disputeReason}` : ''}
+              {displayedDisputeReason ? `：${displayedDisputeReason}` : ''}
             </div>
           )}
 
-          {/* Stage 2: Role-Specific Payment Confirmation Bar (only when order is active/completed) */}
+          {/* Stage 2: Role-Specific Payment Confirmation Bar */}
           {!isFreeOrder && !isPendingApproval && !isCancelled && order.status !== 'disputed' && (
             <div className="flex flex-wrap items-center justify-between gap-2 bg-white border border-slate-200 rounded-xl px-2.5 py-2">
               <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
@@ -1040,7 +792,13 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
                 {bothRevealed ? (
                   <span className="flex items-center gap-1 text-emerald-700 font-bold">
                     <UserCheck className="w-3.5 h-3.5" />
-                    <span>{t.revealedStatus}</span>
+                    <span>
+                      {isFemaleDormOrder
+                        ? lang === 'zh'
+                          ? '女宿實名保護'
+                          : 'Female Dorm Real-ID'
+                        : t.revealedStatus}
+                    </span>
                   </span>
                 ) : iRevealed ? (
                   <span className="text-amber-700 font-medium">{t.revealRequested}</span>
@@ -1110,7 +868,7 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
           )}
         </div>
 
-        {/* Message Thread Body */}
+        {/* Clean Message Thread Body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50">
           <div className="text-center my-1">
             <span className="text-[10px] text-slate-400 bg-slate-100 px-3 py-1 rounded-full font-mono">
@@ -1118,9 +876,13 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
                 ? lang === 'zh'
                   ? '女宿實名專屬聊天室 · 保障住宿安全'
                   : 'Female Dorm Real-ID Protected Chat'
-                : lang === 'zh'
-                  ? '1-on-1 私密聊天室 · 雙方皆同意解除匿名才顯示真實姓名'
-                  : 'Private 1-on-1 Chat · Real names hidden until mutual consent'}
+                : bothRevealed
+                  ? lang === 'zh'
+                    ? '1-on-1 即時聊天室 · 點擊上方「查看檔案」可查閱對方評價'
+                    : 'Private 1-on-1 Chat · Tap Profile above to view reviews'
+                  : lang === 'zh'
+                    ? '1-on-1 私密聊天室 · 雙方皆同意解除匿名才顯示真實姓名'
+                    : 'Private 1-on-1 Chat · Real names hidden until mutual consent'}
             </span>
           </div>
 
@@ -1132,49 +894,15 @@ export const ChatRoomModal: React.FC<ChatRoomModalProps> = ({
             </div>
           )}
 
-          {messages.map((msg) => {
-            const isSystem = msg.senderUid === 'system';
-            const displayMsgText = localizeChatMessageText(msg.text, lang);
-            if (isSystem) {
-              return (
-                <div key={msg.id} className="text-center my-1.5">
-                  <span className="inline-block text-[10px] text-slate-500 bg-slate-200/70 px-3 py-1 rounded-xl max-w-[90%]">
-                    {displayMsgText}
-                  </span>
-                </div>
-              );
-            }
-
-            const isMe = msg.senderUid === currentUser.id;
-            const senderDisplayName = isMe
-              ? lang === 'zh'
-                ? '我'
-                : 'Me'
-              : otherPartyDisplayName;
-
-            return (
-              <div
-                key={msg.id}
-                className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} space-y-1`}
-              >
-                <div className="flex items-center gap-1.5 text-[10px] text-slate-400 px-1">
-                  <span>{senderDisplayName}</span>
-                  <span>·</span>
-                  <span className="font-mono">{msg.timestampText || (lang === 'zh' ? '剛剛' : 'Now')}</span>
-                </div>
-
-                <div
-                  className={`p-3 rounded-2xl text-xs leading-relaxed max-w-[85%] ${
-                    isMe
-                      ? 'bg-emerald-700 text-white rounded-br-xs'
-                      : 'bg-white text-slate-800 border border-slate-200 shadow-2xs rounded-bl-xs'
-                  }`}
-                >
-                  {displayMsgText}
-                </div>
-              </div>
-            );
-          })}
+          {messages.map((msg) => (
+            <ChatMessageBubble
+              key={msg.id}
+              msg={msg}
+              isMe={msg.senderUid === currentUser.id}
+              otherPartyDisplayName={otherPartyDisplayName}
+              lang={lang}
+            />
+          ))}
           <div ref={messagesEndRef} />
         </div>
 

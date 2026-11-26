@@ -3,15 +3,18 @@ import { PostItem, OrderItem, UserProfile, Language } from '../types';
 import {
   calculateHaversineDistanceMeters,
   formatDistance,
-  localizeLocationName,
   isFemaleDormLocationName,
 } from '../utils/lbs';
 import {
   formatPaymentMethodLabel,
   formatRemainingMinutes,
-  containsChinese,
-  translateTextToEnglish,
+  localizeTimeString,
 } from '../utils/formatters';
+import {
+  useAutoTranslateText,
+  useAutoTranslateLocation,
+  useAutoTranslateArray,
+} from '../hooks/useAutoTranslate';
 import { I18N } from '../data/i18n';
 import {
   X,
@@ -25,7 +28,6 @@ import {
   Flag,
   Pencil,
   Trash2,
-  Globe,
   Siren,
   Lock,
 } from 'lucide-react';
@@ -60,9 +62,16 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   lang,
 }) => {
   const [isApplying, setIsApplying] = useState<boolean>(false);
-  const [translatedTitle, setTranslatedTitle] = useState<string | null>(null);
-  const [translatedDesc, setTranslatedDesc] = useState<string | null>(null);
-  const [isTranslating, setIsTranslating] = useState<boolean>(false);
+
+  const displayTitle = useAutoTranslateText(post.title, lang, post.titleEn);
+  const displayDesc = useAutoTranslateText(post.description, lang, post.descriptionEn);
+  const displayPaymentNote = useAutoTranslateText(post.paymentNote, lang);
+  const displayLocation = useAutoTranslateLocation(
+    post.locationName,
+    lang,
+    post.locationNameEn
+  );
+  const displayTags = useAutoTranslateArray(post.tags, lang);
 
   if (!isOpen) return null;
   const t = I18N[lang];
@@ -72,7 +81,6 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
     post.locationCoordinates
   );
   const formattedDist = formatDistance(distanceMeters);
-  const displayLocation = localizeLocationName(post.locationName, lang, post.locationNameEn);
 
   const isMyPost = post.creatorId === currentUser.id;
   const isEmergency = post.category === 'emergency';
@@ -108,39 +116,6 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
         : lang === 'zh'
           ? '應付款方：接單者'
           : 'Payer: Accepter';
-
-  const rawTitle =
-    lang === 'zh'
-      ? post.title
-      : translatedTitle ||
-        (post.titleEn && !containsChinese(post.titleEn) ? post.titleEn : post.title);
-  const rawDesc =
-    lang === 'zh'
-      ? post.description
-      : translatedDesc ||
-        (post.descriptionEn && !containsChinese(post.descriptionEn)
-          ? post.descriptionEn
-          : post.description);
-
-  const needsTranslation =
-    lang === 'en' &&
-    ((containsChinese(rawTitle) && !translatedTitle) ||
-      (containsChinese(rawDesc) && !translatedDesc));
-
-  const handleTranslateAll = async () => {
-    if (isTranslating) return;
-    setIsTranslating(true);
-    try {
-      const [enTitle, enDesc] = await Promise.all([
-        translateTextToEnglish(post.title),
-        translateTextToEnglish(post.description),
-      ]);
-      setTranslatedTitle(enTitle);
-      setTranslatedDesc(enDesc);
-    } finally {
-      setIsTranslating(false);
-    }
-  };
 
   const handleClaim = async () => {
     setIsApplying(true);
@@ -251,7 +226,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               )}
               <span className="text-slate-400 font-mono">★{post.creatorTrustScore}</span>
               <span className="text-slate-400">·</span>
-              <span className="text-slate-500">{post.createdAt}</span>
+              <span className="text-slate-500">{localizeTimeString(post.createdAt, lang)}</span>
             </div>
 
             <span className="font-mono text-xs text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg font-bold shrink-0 tabular-nums">
@@ -279,27 +254,11 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             </div>
           )}
 
-          {/* Title + Translate to English */}
-          <div className="space-y-2">
+          {/* Auto-translated Title */}
+          <div>
             <h2 className="text-base sm:text-lg font-bold text-slate-900 leading-snug">
-              {rawTitle}
+              {displayTitle}
             </h2>
-
-            {needsTranslation && (
-              <button
-                type="button"
-                onClick={() => void handleTranslateAll()}
-                disabled={isTranslating}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-bold cursor-pointer transition-colors"
-              >
-                {isTranslating ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Globe className="w-3.5 h-3.5 text-emerald-700" />
-                )}
-                <span>{isTranslating ? 'Translating...' : t.translateToEn}</span>
-              </button>
-            )}
           </div>
 
           {/* Quota Panel — STRICTLY ONLY for leftovers & group_buy */}
@@ -327,9 +286,9 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             </div>
           )}
 
-          {/* Description */}
+          {/* Auto-translated Description */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-700 leading-relaxed whitespace-pre-line">
-            {rawDesc}
+            {displayDesc}
           </div>
 
           {/* Location & Distance */}
@@ -363,10 +322,10 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                 {directionLabel}
               </span>
             </div>
-            {post.paymentNote && (
+            {displayPaymentNote && (
               <p className="text-[11px] text-slate-600 pl-5">
                 {lang === 'zh' ? '收款備註：' : 'Payment note: '}
-                {post.paymentNote}
+                {displayPaymentNote}
               </p>
             )}
           </div>
@@ -383,7 +342,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           )}
 
           <div className="flex flex-wrap gap-1.5 pt-1">
-            {post.tags.map((tg, i) => (
+            {displayTags.map((tg, i) => (
               <span
                 key={i}
                 className="text-[11px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md"

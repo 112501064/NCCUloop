@@ -51,6 +51,7 @@ import { TaskDetailModal } from './components/TaskDetailModal';
 import { PostCreateModal } from './components/PostCreateModal';
 import { TranscriptVerifyModal } from './components/TranscriptVerifyModal';
 import { ChatRoomModal } from './components/ChatRoomModal';
+import { PeerProfileModal } from './components/PeerProfileModal';
 import { ReportDisputeModal } from './components/ReportDisputeModal';
 import { AdminReviewModal } from './components/AdminReviewModal';
 import { OnboardingGate } from './components/OnboardingGate';
@@ -388,6 +389,7 @@ export default function App() {
   // Modals state
   const [selectedDetailPostId, setSelectedDetailPostId] = useState<string | null>(null);
   const [activeChatOrderId, setActiveChatOrderId] = useState<string | null>(null);
+  const [reviewModalOrderId, setReviewModalOrderId] = useState<string | null>(null);
   const [activeDisputeTarget, setActiveDisputeTarget] = useState<{
     order?: OrderItem | null;
     post?: PostItem | null;
@@ -1019,7 +1021,7 @@ export default function App() {
         updatedAt: serverTimestamp(),
       };
 
-      if (isFemaleDormTask) {
+      if (isFemaleDormTask || !isAnonymous) {
         payload.creatorRealName = myReal;
       }
       if (newPostData.titleEn) payload.titleEn = newPostData.titleEn.slice(0, 160);
@@ -1050,7 +1052,7 @@ export default function App() {
       id: newId,
       creatorId: currentUser.id,
       creatorName: myNick,
-      creatorRealName: isFemaleDormTask ? myReal : undefined,
+      creatorRealName: isFemaleDormTask || !isAnonymous ? myReal : undefined,
       creatorGender: currentUser.gender,
       creatorTrustScore: currentUser.trustScore,
       isCreatorAnonymous: isAnonymous,
@@ -1366,6 +1368,14 @@ export default function App() {
           tx.update(taskRef, taskUpdate);
         });
 
+        const isNonAnonTask = !post.isCreatorAnonymous;
+        const initialRevealed = isFemaleDormTask || isNonAnonTask;
+        const initialNoticeText = isFemaleDormTask
+          ? '［接單通知］我已實名申請接單，請雙方確認資料後點擊確認接單！'
+          : isNonAnonTask
+            ? '［接單通知］我已申請接單，請發布者點擊我的個人檔案與評價審核確認！'
+            : '［接單通知］我已申請接單，請先於聊天室解除匿名並檢視資料後確認接單！';
+
         // 2. Create independent child Order in `pending_approval`
         const orderPayload: Record<string, unknown> = {
           taskId: post.id,
@@ -1378,22 +1388,22 @@ export default function App() {
           isFemaleDormOnly: isFemaleDormTask,
           creatorUid: post.creatorId,
           creatorName: post.creatorName.slice(0, 64),
-          creatorAnonymous: isFemaleDormTask ? false : Boolean(post.isCreatorAnonymous),
+          creatorAnonymous: !initialRevealed,
           accepterUid: firebaseUser.uid,
           accepterName: myNick,
-          accepterAnonymous: isFemaleDormTask ? false : true,
+          accepterAnonymous: !initialRevealed,
           status: 'pending_approval',
           creatorPaidConfirmed: false,
           accepterPaidConfirmed: false,
           creatorDoneConfirmed: false,
           accepterDoneConfirmed: false,
-          revealCreator: isFemaleDormTask,
-          revealAccepter: isFemaleDormTask,
+          revealCreator: initialRevealed,
+          revealAccepter: initialRevealed,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
 
-        if (isFemaleDormTask) {
+        if (initialRevealed) {
           orderPayload.creatorRealName = (post.creatorRealName || post.creatorName).slice(0, 64);
           orderPayload.accepterRealName = myReal;
         }
@@ -1409,9 +1419,7 @@ export default function App() {
 
         // 3. Initial claim message
         await addDoc(collection(db, 'orders', orderRef.id, 'messages'), {
-          text: isFemaleDormTask
-            ? '［接單通知］我已實名申請接單，請雙方確認資料後點擊確認接單！'
-            : '［接單通知］我已申請接單，請先於聊天室解除匿名並檢視資料後確認接單！',
+          text: initialNoticeText,
           senderUid: firebaseUser.uid,
           senderName: myNick,
           createdAt: serverTimestamp(),
@@ -1439,19 +1447,19 @@ export default function App() {
           isFemaleDormOnly: isFemaleDormTask,
           creatorUid: post.creatorId,
           creatorName: post.creatorName,
-          creatorRealName: isFemaleDormTask ? post.creatorRealName || post.creatorName : undefined,
-          creatorAnonymous: isFemaleDormTask ? false : Boolean(post.isCreatorAnonymous),
+          creatorRealName: initialRevealed ? post.creatorRealName || post.creatorName : undefined,
+          creatorAnonymous: !initialRevealed,
           accepterUid: firebaseUser.uid,
           accepterName: myNick,
-          accepterRealName: isFemaleDormTask ? myReal : undefined,
-          accepterAnonymous: isFemaleDormTask ? false : true,
+          accepterRealName: initialRevealed ? myReal : undefined,
+          accepterAnonymous: !initialRevealed,
           status: 'pending_approval',
           creatorPaidConfirmed: false,
           accepterPaidConfirmed: false,
           creatorDoneConfirmed: false,
           accepterDoneConfirmed: false,
-          revealCreator: isFemaleDormTask,
-          revealAccepter: isFemaleDormTask,
+          revealCreator: initialRevealed,
+          revealAccepter: initialRevealed,
           createdAtMs: Date.now(),
           updatedAtMs: Date.now(),
         };
@@ -1494,6 +1502,14 @@ export default function App() {
       )
     );
 
+    const isNonAnonTask = !post.isCreatorAnonymous;
+    const initialRevealed = isFemaleDormTask || isNonAnonTask;
+    const initialNoticeText = isFemaleDormTask
+      ? '［接單通知］我已實名申請接單，請雙方確認資料後點擊確認接單！'
+      : isNonAnonTask
+        ? '［接單通知］我已申請接單，請發布者點擊我的個人檔案與評價審核確認！'
+        : '［接單通知］我已申請接單，請先於聊天室解除匿名並檢視資料後確認接單！';
+
     const demoOrderId = `order_${Date.now()}`;
     const demoOrder: OrderItem = {
       id: demoOrderId,
@@ -1517,19 +1533,19 @@ export default function App() {
       isFemaleDormOnly: isFemaleDormTask,
       creatorUid: post.creatorId,
       creatorName: post.creatorName,
-      creatorRealName: isFemaleDormTask ? post.creatorRealName || post.creatorName : undefined,
-      creatorAnonymous: isFemaleDormTask ? false : Boolean(post.isCreatorAnonymous),
+      creatorRealName: initialRevealed ? post.creatorRealName || post.creatorName : undefined,
+      creatorAnonymous: !initialRevealed,
       accepterUid: currentUser.id,
       accepterName: myNick,
-      accepterRealName: isFemaleDormTask ? myReal : undefined,
-      accepterAnonymous: isFemaleDormTask ? false : true,
+      accepterRealName: initialRevealed ? myReal : undefined,
+      accepterAnonymous: !initialRevealed,
       status: 'pending_approval',
       creatorPaidConfirmed: false,
       accepterPaidConfirmed: false,
       creatorDoneConfirmed: false,
       accepterDoneConfirmed: false,
-      revealCreator: isFemaleDormTask,
-      revealAccepter: isFemaleDormTask,
+      revealCreator: initialRevealed,
+      revealAccepter: initialRevealed,
       createdAtMs: Date.now(),
       updatedAtMs: Date.now(),
     };
@@ -1539,9 +1555,7 @@ export default function App() {
       [demoOrderId]: [
         {
           id: `msg_${Date.now()}`,
-          text: isFemaleDormTask
-            ? '［接單通知］我已實名申請接單，請雙方確認資料後點擊確認接單！'
-            : '［接單通知］我已申請接單，請先於聊天室解除匿名並檢視資料後確認接單！',
+          text: initialNoticeText,
           senderUid: currentUser.id,
           senderName: myNick,
           createdAtMs: Date.now(),
@@ -1626,10 +1640,103 @@ export default function App() {
       );
     }
 
+    if (reviewModalOrderId === order.id) {
+      setReviewModalOrderId(null);
+    }
+    if (activeChatOrderId === order.id) {
+      setActiveChatOrderId(null);
+    }
+
     showToast(
       lang === 'zh'
         ? '已婉拒此接單申請，任務名額已重新釋出至大廳。'
         : 'Application declined and task spot released.'
+    );
+  };
+
+  // Creator confirms applicant from PeerProfileModal -> transition order to in_progress & enter chat
+  const handleApproveOrder = async (order: OrderItem) => {
+    if (order.creatorUid !== currentUser.id) return;
+
+    if (isFirebaseVerified && firebaseUser) {
+      try {
+        await updateDoc(doc(db, 'orders', order.id), {
+          status: 'in_progress',
+          updatedAt: serverTimestamp(),
+        });
+
+        await addDoc(collection(db, 'orders', order.id, 'messages'), {
+          text: '［系統通知］發布者已正式確認由您接單，訂單成立進行中！',
+          senderUid: firebaseUser.uid,
+          senderName: currentUser.nickname || currentUser.name,
+          createdAt: serverTimestamp(),
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `orders/${order.id}`);
+        return;
+      }
+    } else {
+      handleLocalUpdateOrder(order.id, { status: 'in_progress' });
+      handleLocalSendMessage(
+        order.id,
+        '［系統通知］發布者已正式確認由您接單，訂單成立進行中！'
+      );
+    }
+
+    setReviewModalOrderId(null);
+    setActiveChatOrderId(order.id);
+    showToast(
+      lang === 'zh'
+        ? '✅ 已正式確認接單，已進入 1-on-1 聊天室！'
+        : '✅ Applicant approved! Chat room opened.'
+    );
+  };
+
+  // Request or consent to mutual reveal from PeerProfileModal
+  const handleRequestMutualReveal = async (order: OrderItem) => {
+    const isCreator = currentUser.id === order.creatorUid;
+    const myNick = (currentUser.nickname || currentUser.name).slice(0, 64);
+    const myReal = (currentUser.realName || myNick).slice(0, 64);
+    const patch: Partial<OrderItem> = isCreator
+      ? {
+          revealCreator: true,
+          creatorName: myNick,
+          creatorRealName: myReal,
+        }
+      : {
+          revealAccepter: true,
+          accepterName: myNick,
+          accepterRealName: myReal,
+        };
+
+    if (isFirebaseVerified && firebaseUser) {
+      try {
+        await updateDoc(doc(db, 'orders', order.id), {
+          ...patch,
+          updatedAt: serverTimestamp(),
+        });
+        await addDoc(collection(db, 'orders', order.id, 'messages'), {
+          text: '［身分揭曉］我已同意解除匿名（雙方皆同意後將顯示暱稱與本名）。',
+          senderUid: firebaseUser.uid,
+          senderName: myNick,
+          createdAt: serverTimestamp(),
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `orders/${order.id}`);
+        return;
+      }
+    } else {
+      handleLocalUpdateOrder(order.id, patch);
+      handleLocalSendMessage(
+        order.id,
+        '［身分揭曉］我已同意解除匿名（雙方皆同意後將顯示暱稱與本名）。'
+      );
+    }
+
+    showToast(
+      lang === 'zh'
+        ? '已同意解除匿名！雙方皆同意後將解鎖對方資料與歷史評價。'
+        : 'Agreed to reveal identity!'
     );
   };
 
@@ -2153,6 +2260,7 @@ export default function App() {
     setFirebaseUser(null);
     setUserDocExists(false);
     setActiveChatOrderId(null);
+    setReviewModalOrderId(null);
     setSelectedDetailPostId(null);
     setCurrentNavTab('feed');
     setIsOnboarded(false);
@@ -2182,6 +2290,10 @@ export default function App() {
 
   const activeChatOrder = activeChatOrderId
     ? orders.find((o) => o.id === activeChatOrderId) || null
+    : null;
+
+  const reviewModalOrder = reviewModalOrderId
+    ? orders.find((o) => o.id === reviewModalOrderId) || null
     : null;
 
   const existingReviewForActiveOrder = useMemo(() => {
@@ -2353,7 +2465,16 @@ export default function App() {
           <ChatsView
             orders={orders}
             currentUser={currentUser}
-            onOpenOrderChat={(order) => setActiveChatOrderId(order.id)}
+            onOpenOrderChat={(order) => {
+              const isCreatorPending =
+                order.creatorUid === currentUser.id &&
+                (order.status === 'pending_approval' || order.status === 'pending_confirm');
+              if (isCreatorPending) {
+                setReviewModalOrderId(order.id);
+              } else {
+                setActiveChatOrderId(order.id);
+              }
+            }}
             lang={lang}
           />
         )}
@@ -2451,16 +2572,33 @@ export default function App() {
           useFirestoreRealtime={isFirebaseVerified}
           existingReview={existingReviewForActiveOrder}
           localMessages={localOrderMessagesMap[activeChatOrder.id] || []}
-          localReviews={isFirebaseVerified ? [] : localReviews}
           onLocalSendMessage={handleLocalSendMessage}
           onLocalUpdateOrder={handleLocalUpdateOrder}
           onDeclineOrder={handleDeclineOrder}
+          onOpenPeerProfile={(ord) => setReviewModalOrderId(ord.id)}
           onSubmitReview={handleSubmitReview}
           onOpenDispute={(ord) => {
             setActiveChatOrderId(null);
             setActiveDisputeTarget({ order: ord });
           }}
           onShowToast={showToast}
+          lang={lang}
+        />
+      )}
+
+      {/* Applicant Profile-First Approval & In-Chat Profile Modal */}
+      {reviewModalOrder && (
+        <PeerProfileModal
+          isOpen={Boolean(reviewModalOrder)}
+          onClose={() => setReviewModalOrderId(null)}
+          order={reviewModalOrder}
+          currentUser={currentUser}
+          useFirestoreRealtime={isFirebaseVerified}
+          localReviews={isFirebaseVerified ? [] : localReviews}
+          onApproveOrder={handleApproveOrder}
+          onDeclineOrder={handleDeclineOrder}
+          onRequestMutualReveal={handleRequestMutualReveal}
+          onOpenChat={(ord) => setActiveChatOrderId(ord.id)}
           lang={lang}
         />
       )}

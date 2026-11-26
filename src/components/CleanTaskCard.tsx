@@ -1,14 +1,17 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { PostItem, UserProfile, Language } from '../types';
 import {
   calculateHaversineDistanceMeters,
   formatDistance,
-  localizeLocationName,
   isFemaleDormLocationName,
 } from '../utils/lbs';
-import { containsChinese, translateTextToEnglish } from '../utils/formatters';
+import { formatRemainingMinutes } from '../utils/formatters';
+import {
+  useAutoTranslateText,
+  useAutoTranslateLocation,
+} from '../hooks/useAutoTranslate';
 import { I18N } from '../data/i18n';
-import { MapPin, Clock, User, Lock, Globe, Loader2 } from 'lucide-react';
+import { MapPin, Clock, User, Lock } from 'lucide-react';
 
 interface CleanTaskCardProps {
   post: PostItem;
@@ -24,15 +27,18 @@ export const CleanTaskCard: React.FC<CleanTaskCardProps> = ({
   lang,
 }) => {
   const t = I18N[lang];
-  const [translatedTitle, setTranslatedTitle] = useState<string | null>(null);
-  const [isTranslating, setIsTranslating] = useState<boolean>(false);
 
   const distanceMeters = calculateHaversineDistanceMeters(
     currentUser.currentCoordinates,
     post.locationCoordinates
   );
   const formattedDist = formatDistance(distanceMeters);
-  const displayLocation = localizeLocationName(post.locationName, lang, post.locationNameEn);
+  const displayLocation = useAutoTranslateLocation(
+    post.locationName,
+    lang,
+    post.locationNameEn
+  );
+  const displayTitle = useAutoTranslateText(post.title, lang, post.titleEn);
 
   const categoryConfig: Record<string, { label: string; bg: string; text: string }> = {
     leftovers: {
@@ -88,26 +94,10 @@ export const CleanTaskCard: React.FC<CleanTaskCardProps> = ({
     post.isFemaleDormOnly || isFemaleDormLocationName(post.locationName)
   );
 
-  const rawDisplayTitle =
-    lang === 'zh'
-      ? post.title
-      : translatedTitle ||
-        (post.titleEn && !containsChinese(post.titleEn) ? post.titleEn : post.title);
-
-  const canShowTranslateBtn =
-    lang === 'en' && !translatedTitle && containsChinese(rawDisplayTitle);
-
-  const handleTranslateTitle = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (isTranslating) return;
-    setIsTranslating(true);
-    try {
-      const res = await translateTextToEnglish(post.title);
-      setTranslatedTitle(res);
-    } finally {
-      setIsTranslating(false);
-    }
-  };
+  const displayTime =
+    post.remainingMinutes !== undefined
+      ? formatRemainingMinutes(post.remainingMinutes, lang)
+      : post.timeRemainingText || post.expiresAt;
 
   return (
     <div
@@ -182,33 +172,18 @@ export const CleanTaskCard: React.FC<CleanTaskCardProps> = ({
         </div>
       </div>
 
-      {/* Row 2: Title + Optional EN Translate button */}
-      <div className="space-y-1.5">
+      {/* Row 2: Auto-translated Title */}
+      <div>
         <h3 className="text-sm sm:text-base font-bold text-slate-900 line-clamp-2 leading-snug">
-          {rawDisplayTitle}
+          {displayTitle}
         </h3>
-        {canShowTranslateBtn && (
-          <button
-            type="button"
-            onClick={(e) => void handleTranslateTitle(e)}
-            disabled={isTranslating}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-semibold cursor-pointer transition-colors"
-          >
-            {isTranslating ? (
-              <Loader2 className="w-3 h-3 animate-spin" />
-            ) : (
-              <Globe className="w-3 h-3 text-emerald-700" />
-            )}
-            <span>{isTranslating ? 'Translating...' : t.translateToEn}</span>
-          </button>
-        )}
       </div>
 
       {/* Row 3: Time remaining + Price */}
       <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
         <div className="flex items-center gap-1 text-slate-500 text-[11px] font-mono tabular-nums">
           <Clock className="w-3 h-3 text-slate-400" />
-          <span>{post.timeRemainingText || post.expiresAt}</span>
+          <span>{displayTime}</span>
         </div>
 
         <div className="text-right">
